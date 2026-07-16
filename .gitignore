@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+runtime/
+*.tmp
+*.log
+
+# 수집 원본·중간 산출물 (재현 가능)
+data/hwp/
+data/markdown/
+
+# 전량 코퍼스는 로컬 전용 — 공개 배포는 rules_corpus.sample.json(민감 서식 제외 데모)만.
+# 전량은 collect_rules.py로 각자 수집.
+data/rules_corpus.json
+data/rules_corpus.pre_cleanup.json
+data/rules_corpus_cleanup_report.json
+data/selected_rules.json
+data/failures.jsonl
+data/first_run_report.json

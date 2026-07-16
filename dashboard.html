@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CNU 규정 나침반 — 운영 대시보드</title>
+<style>
+:root{--navy:#16294d;--blue:#3949ab;--gold:#c19a3e;--pale:#eef2f8;--line:#c8d4df;--ink:#182431;--gray:#657585}
+*{box-sizing:border-box}
+body{margin:0;background:var(--pale);color:var(--ink);font-family:"Pretendard","Apple SD Gothic Neo",sans-serif}
+header{padding:26px 30px;background:linear-gradient(135deg,var(--navy),var(--blue));color:white}
+header h1{margin:0;font-size:24px} .wrap{max-width:1080px;margin:auto;padding:24px 24px 48px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+.card,.panel{background:white;border:1px solid var(--line);border-radius:12px}
+.card{padding:18px;border-top:3px solid var(--gold)}
+.number{font-size:32px;font-weight:800;color:var(--navy);line-height:1.1}
+.card .lbl{font-size:13.5px;color:var(--gray);margin-top:4px}
+h2{margin:30px 0 12px;color:var(--navy);font-size:18px;border-left:4px solid var(--gold);padding-left:10px}
+.panel{padding:18px 20px}
+.bar-row{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:14px}
+.bar-label{flex:0 0 130px;text-align:right;color:var(--ink)}
+.bar-track{flex:1;background:#e6ecf4;border-radius:6px;height:16px;overflow:hidden}
+.bar-fill{display:block;height:100%;background:linear-gradient(90deg,var(--blue),var(--navy));border-radius:6px}
+.bar-val{flex:0 0 52px;text-align:right;font-weight:700;color:var(--navy)}
+table{border-collapse:collapse;width:100%;background:white;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;font-size:14px}
+th{background:var(--navy);color:white} .muted{color:var(--gray);font-size:13px}
+.empty{color:var(--gray);text-align:center;padding:16px}
+.note{margin-top:8px;font-size:12.5px;color:var(--gray)}
+</style></head><body>
+<header><h1>🧭 CNU 규정 나침반 — 운영 대시보드</h1><div class="muted" style="color:#dbe7f2">공식 규정 코퍼스와 비식별 운영 로그 · 조문 원문 인용·미확인 응답 원칙</div></header>
+<main class="wrap"><section class="cards">
+<div class="card"><div class="number">105</div><div class="lbl">규정 수</div></div>
+<div class="card"><div class="number">1687</div><div class="lbl">조문 수 (무결성 검증 적재)</div></div>
+<div class="card"><div class="number">15</div><div class="lbl">편제</div></div>
+<div class="card"><div class="number">0</div><div class="lbl">미확인 지식 후보</div></div>
+</section>
+<h2>편제별 조문 분포</h2><div class="panel"><div class="bar-row"><span class="bar-label">교무과</span><span class="bar-track"><span class="bar-fill" style="width:100.0%"></span></span><span class="bar-val">376</span></div><div class="bar-row"><span class="bar-label">학사과</span><span class="bar-track"><span class="bar-fill" style="width:93.1%"></span></span><span class="bar-val">350</span></div><div class="bar-row"><span class="bar-label">정보화본부</span><span class="bar-track"><span class="bar-fill" style="width:71.3%"></span></span><span class="bar-val">268</span></div><div class="bar-row"><span class="bar-label">총무과</span><span class="bar-track"><span class="bar-fill" style="width:59.0%"></span></span><span class="bar-val">222</span></div><div class="bar-row"><span class="bar-label">연구진흥과</span><span class="bar-track"><span class="bar-fill" style="width:28.7%"></span></span><span class="bar-val">108</span></div><div class="bar-row"><span class="bar-label">대학원</span><span class="bar-track"><span class="bar-fill" style="width:21.8%"></span></span><span class="bar-val">82</span></div><div class="bar-row"><span class="bar-label">감사센터</span><span class="bar-track"><span class="bar-fill" style="width:18.1%"></span></span><span class="bar-val">68</span></div><div class="bar-row"><span class="bar-label">연구실안전관리센터</span><span class="bar-track"><span class="bar-fill" style="width:18.1%"></span></span><span class="bar-val">68</span></div><div class="bar-row"><span class="bar-label">학생과</span><span class="bar-track"><span class="bar-fill" style="width:15.7%"></span></span><span class="bar-val">59</span></div><div class="bar-row"><span class="bar-label">국제협력과</span><span class="bar-track"><span class="bar-fill" style="width:6.6%"></span></span><span class="bar-val">25</span></div><div class="bar-row"><span class="bar-label">재무과</span><span class="bar-track"><span class="bar-fill" style="width:6.6%"></span></span><span class="bar-val">25</span></div><div class="bar-row"><span class="bar-label">학군단</span><span class="bar-track"><span class="bar-fill" style="width:3.2%"></span></span><span class="bar-val">12</span></div><div class="bar-row"><span class="bar-label">재정전략실</span><span class="bar-track"><span class="bar-fill" style="width:2.7%"></span></span><span class="bar-val">10</span></div><div class="bar-row"><span class="bar-label">생활관</span><span class="bar-track"><span class="bar-fill" style="width:2.4%"></span></span><span class="bar-val">9</span></div><div class="bar-row"><span class="bar-label">교학기획과</span><span class="bar-track"><span class="bar-fill" style="width:1.3%"></span></span><span class="bar-val">5</span></div></div>
+<p class="note">빈 조문·중복·비정상 본문은 적재 시점에 걸러낸 뒤 인덱싱한 결과입니다.</p>
+<h2>최근 질의 로그</h2><table><thead><tr><th>시간(UTC)</th><th>마스킹 질의</th><th>상태</th></tr></thead><tbody><tr><td colspan="3" class="empty">질의 기록 없음 — 이용이 쌓이면 여기에 표시됩니다</td></tr></tbody></table>
+<h2>미확인 질의 — 지식 후보</h2><table><thead><tr><th>ID</th><th>질의 횟수</th><th>마스킹 질의</th></tr></thead><tbody><tr><td colspan="3" class="empty">대기 중인 지식 후보 없음 — 답 못 한 질의가 여기 쌓입니다</td></tr></tbody></table>
+</main></body></html>
