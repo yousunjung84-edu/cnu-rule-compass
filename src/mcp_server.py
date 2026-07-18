@@ -9,8 +9,9 @@ from __future__ import annotations
 from src.search import get_default_index
 
 
-TOOL_NAMES = ("search_rule", "get_article")
+TOOL_NAMES = ("search_rule", "get_article", "get_article_as_of")
 MAX_QUERY_LENGTH = 500
+_DATE_FORMAT = "YYYY-MM-DD"
 
 
 def _invalid_argument(field: str, message: str) -> dict:
@@ -75,6 +76,27 @@ def get_article(규정명: str, 조문번호: str, record_id: str | None = None)
     }
 
 
+def get_article_as_of(규정명: str, 날짜: str, 키워드: str | None = None) -> dict:
+    """지정 날짜에 유효했던 판본의 조문을 반환한다(개정 계열 수집 규정 한정).
+
+    감사 대응처럼 '그 업무 당시 유효 규정'이 필요한 질의를 위한 시점 질의 도구다.
+    """
+    if not isinstance(규정명, str) or not 규정명.strip() or len(규정명) > 200:
+        return _invalid_argument("규정명", "규정명은 1자 이상 200자 이하 문자열이어야 합니다.")
+    if not isinstance(날짜, str) or len(날짜) != 10:
+        return _invalid_argument("날짜", f"날짜는 {_DATE_FORMAT} 형식이어야 합니다.")
+    if 키워드 is not None and (not isinstance(키워드, str) or len(키워드) > MAX_QUERY_LENGTH):
+        return _invalid_argument("키워드", f"키워드는 {MAX_QUERY_LENGTH}자 이하 문자열이어야 합니다.")
+    from src.lineage import get_default_lineage
+
+    lineage = get_default_lineage()
+    rule_name = lineage.resolve_rule(규정명.strip()) or 규정명.strip()
+    try:
+        return lineage.articles_as_of(rule_name, 날짜.strip(), keyword=키워드)
+    except ValueError as exc:
+        return _invalid_argument("날짜", str(exc))
+
+
 def create_server():
     """FastMCP 서버를 만들며, 패키지가 없으면 설치 안내 오류를 낸다."""
     try:
@@ -88,6 +110,7 @@ def create_server():
     server = FastMCP("CNU 규정 나침반")
     server.tool(name="search_rule")(search_rule)
     server.tool(name="get_article")(get_article)
+    server.tool(name="get_article_as_of")(get_article_as_of)
     return server
 
 

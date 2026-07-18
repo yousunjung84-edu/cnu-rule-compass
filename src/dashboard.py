@@ -29,12 +29,17 @@ def build_state(
     distribution = Counter(str(item.get("편제", "미분류")) for item in articles)
     regulations = {str(item.get("규정명", "")) for item in articles if item.get("규정명")}
     logs = list(reversed(target.read("queries")[-max(recent, 0):]))
+    # 적재 대장 — 이 코퍼스가 어떤 검증을 거쳐 들어왔는지(역전된 승인 모델).
+    from src.ledger import record_ingest
+
+    ingest = record_ingest(search_index)
     return {
         "corpus": {
             "regulation_count": len(regulations),
             "article_count": len(articles),
             "division_distribution": dict(sorted(distribution.items())),
         },
+        "ingest": ingest,
         "recent_queries": logs,
         "candidates": list_candidates(target),
     }
@@ -77,6 +82,21 @@ def render_html(state: dict) -> str:
         [row.get("id", ""), row.get("asked_count", 1), row.get("question", "")]
         for row in state["candidates"]
     ]) or '<tr><td colspan="3" class="empty">대기 중인 지식 후보 없음 — 답 못 한 질의가 여기 쌓입니다</td></tr>'
+    ingest = state.get("ingest", {})
+    reject_reasons = ", ".join(
+        f"{reason} {count}건" for reason, count in ingest.get("rejected_by_reason", {}).items()
+    ) or "없음"
+    ingest_html = (
+        f'<div class="panel"><div class="bar-row"><span class="bar-label">검증 통과 적재</span>'
+        f'<span class="bar-val" style="flex:0 0 90px">{ingest.get("accepted", "—")}건</span>'
+        f'<span class="bar-label" style="flex:0 0 110px">승인 대기(이탈)</span>'
+        f'<span class="bar-val" style="flex:0 0 90px">{ingest.get("rejected", "—")}건</span></div>'
+        f'<p class="note">코퍼스 지문 {html.escape(str(ingest.get("corpus_fingerprint", "")))} · '
+        f'검증 규칙 {html.escape(str(ingest.get("rules_version", "")))} · '
+        f'거부 사유: {html.escape(reject_reasons)}</p>'
+        f'<p class="note">자동 무결성 검증이 기본, 검증을 통과하지 못한 이탈분만 사람 승인 큐'
+        f'(pending_review.json)로 올라갑니다.</p></div>'
+    )
     return f"""<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CNU 규정 나침반 — 운영 대시보드</title>
@@ -114,6 +134,7 @@ th{{background:var(--navy);color:white}} .muted{{color:var(--gray);font-size:13p
 <h2>편제별 조문 분포</h2><div class="panel">{div_bars}</div>
 <p class="note">빈 조문·중복·비정상 본문은 적재 시점에 걸러낸 뒤 인덱싱한 결과입니다.</p>
 <h2>최근 질의 로그</h2><table><thead><tr><th>시간(UTC)</th><th>마스킹 질의</th><th>상태</th></tr></thead><tbody>{recent}</tbody></table>
+<h2>적재 대장 — 역전된 승인</h2>{ingest_html}
 <h2>미확인 질의 — 지식 후보</h2><table><thead><tr><th>ID</th><th>질의 횟수</th><th>마스킹 질의</th></tr></thead><tbody>{candidates}</tbody></table>
 </main></body></html>"""
 

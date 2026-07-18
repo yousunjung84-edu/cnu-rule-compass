@@ -187,20 +187,84 @@ class RuleSearchIndex:
         self._average_length = (
             sum(self._lengths) / len(self._lengths) if self._lengths else 1.0
         )
+        # 2단 검색용 규정 프로필: 규정명·편제·조문제목 토큰을 규정 단위로 집계한다.
+        # 1단(규정 라우팅)에서 질의를 후보 규정으로 좁힌 뒤 2단(조문 검색)을 돌리면,
+        # 본문 우연 매칭으로 엉뚱한 규정의 조문이 상위에 오는 오매칭이 줄어든다.
+        self._rule_docs: dict[str, set[int]] = defaultdict(set)
+        self._rule_profiles: dict[str, Counter[str]] = defaultdict(Counter)
+        for doc_id, article in enumerate(self.articles):
+            name = str(article.get("규정명", ""))
+            self._rule_docs[name].add(doc_id)
+            profile = self._rule_profiles[name]
+            for term in tokenize(name):
+                profile[term] += 3  # 규정명 가중
+            for term in tokenize(article.get("편제", "")):
+                profile[term] += 1
+            for term in tokenize(article.get("조문제목", "")):
+                profile[term] += 2
 
     def _idf(self, term: str) -> float:
         count = self._document_frequencies.get(term, 0)
         total = len(self.articles)
         return math.log(1.0 + (total - count + 0.5) / (count + 0.5))
 
-    def search(self, query: str, k: int = 5) -> list[dict]:
-        """관련 조문 상위 k개를 인용 필드와 점수와 함께 반환한다.
+    def route_rules(self, query: str, top_r: int = 5) -> list[str]:
+        """1단 라우팅 — 질의와 프로필(규정명·편제·조문제목)이 겹치는 후보 규정을 좁힌다.
 
+        보수적으로 동작한다: 완전형(비 gram) 토큰이 하나도 안 겹치는 규정은 후보에서
+        제외하고, 아무 규정도 못 좁히면 빈 목록을 반환해 호출부가 전체 검색으로
+        폴백하게 한다(정답 규정을 잘못 배제하는 것이 오매칭보다 나쁘기 때문).
+        """
+        query_terms = Counter(tokenize(query))
+        if not query_terms:
+            return []
+        scored: list[tuple[float, str]] = []
+        for name, profile in self._rule_profiles.items():
+            core_hit = False
+            score = 0.0
+            for term, qf in query_terms.items():
+                pf = profile.get(term, 0)
+                if not pf:
+                    continue
+                score += self._idf(term) * min(pf, 6) * qf
+                # 라우팅 확정은 비일반 핵심어 완전 매칭만 인정한다. '사용·절차' 같은
+                # 일반 행정어만 겹친 규정으로 좁히면 오히려 오매칭이 생긴다(H-1과 동일 원리).
+                if not term.startswith("#") and term not in _GENERIC_TERMS:
+                    core_hit = True
+            if core_hit and score > 0:
+                scored.append((score, name))
+        scored.sort(key=lambda row: (-row[0], row[1]))
+        return [name for _, name in scored[:top_r]]
+
+    def search(self, query: str, k: int = 5) -> list[dict]:
+        """관련 조문 상위 k개를 인용 필드와 점수와 함께 반환한다 (2단 검색).
+
+        1단에서 후보 규정을 좁히고(route_rules) 2단에서 그 규정들의 조문만 검색한다.
+        1단이 아무 규정도 못 좁히거나 2단 결과가 비면 전체 조문 검색으로 폴백한다.
         검색어와 실질 토큰이 하나도 겹치지 않으면 빈 목록을 반환한다. 따라서 호출부는
         낮은 관련성 결과를 근거로 오인하지 않고 '해당 규정 미확인'으로 처리할 수 있다.
         """
         if not isinstance(query, str) or not query.strip() or k <= 0:
             return []
+        routed = self.route_rules(query)
+        if routed:
+            routed_ids: set[int] = set()
+            for name in routed:
+                routed_ids.update(self._rule_docs.get(name, ()))
+            results = self._search_articles(query, k, restrict_ids=routed_ids)
+            if results:
+                for row in results:
+                    row["routing"] = "rule-first"
+                return results
+        results = self._search_articles(query, k, restrict_ids=None)
+        for row in results:
+            row["routing"] = "full-scan"
+        return results
+
+    def _search_articles(
+        self, query: str, k: int, restrict_ids: set[int] | None
+    ) -> list[dict]:
+        """2단 조문 검색 — 기존 BM25 + 관련성 게이트. restrict_ids로 후보를 제한한다."""
         query_terms = Counter(tokenize(query))
         query_words = _query_words(query)
         if not query_terms or not query_words:
@@ -208,6 +272,8 @@ class RuleSearchIndex:
         candidate_ids: set[int] = set()
         for term in query_terms:
             candidate_ids.update(self._postings.get(term, ()))
+        if restrict_ids is not None:
+            candidate_ids &= restrict_ids
         if not candidate_ids:
             return []
 

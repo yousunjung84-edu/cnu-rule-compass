@@ -19,3 +19,8 @@ data/rules_corpus_cleanup_report.json
 data/selected_rules.json
 data/failures.jsonl
 data/first_run_report.json
+data/hwp_lineage/
+data/markdown_lineage/
+data/lineage_corpus.json
+data/ingest_ledger.json
+data/pending_review.json

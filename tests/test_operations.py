@@ -41,7 +41,7 @@ class OperationsTest(unittest.TestCase):
         self.assertEqual("ok", result["status"])
         self.assertEqual(original["본문"], result["article"]["본문"])
         self.assertEqual(result["record_id"], result["article"]["record_id"])
-        self.assertEqual(("search_rule", "get_article"), TOOL_NAMES)
+        self.assertEqual(("search_rule", "get_article", "get_article_as_of"), TOOL_NAMES)
 
     def test_pii_redaction(self) -> None:
         masked, kinds = redact("학번 2024123456, 전화 010-1234-5678, a@jnu.ac.kr")
@@ -96,3 +96,27 @@ class OperationsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LedgerTest(unittest.TestCase):
+    """적재 대장(역전된 승인) — 자동 검증 기본 + 이탈만 승인 큐."""
+
+    def test_ingest_ledger_and_review_queue(self) -> None:
+        import tempfile
+        from pathlib import Path as P
+        from src.ledger import record_ingest
+        from src.search import RuleSearchIndex
+
+        index = RuleSearchIndex()
+        tmp = P(tempfile.mkdtemp())
+        entry = record_ingest(index, ledger_path=tmp / "l.json", review_path=tmp / "r.json")
+        self.assertEqual(len(index.articles), entry["accepted"])
+        self.assertEqual(len(index.rejected_articles), entry["rejected"])
+        self.assertTrue(entry["corpus_fingerprint"])
+        self.assertEqual("v1", entry["rules_version"])
+        # 같은 코퍼스 지문은 중복 기록하지 않는다.
+        again = record_ingest(index, ledger_path=tmp / "l.json", review_path=tmp / "r.json")
+        self.assertEqual(entry["recorded_at"], again["recorded_at"])
+        # 승인 큐 파일이 생성되고 항목 수가 이탈 수와 일치한다.
+        review = json.loads((tmp / "r.json").read_text(encoding="utf-8"))
+        self.assertEqual(entry["rejected"], len(review["items"]))

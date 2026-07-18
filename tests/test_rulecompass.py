@@ -56,6 +56,16 @@ class RuleCompassTest(unittest.TestCase):
                 self.assertEqual([], self.index.search(query, k=3))
                 self.assertFalse(answer(query, index=self.index)["answered"])
 
+    def test_two_stage_routing(self) -> None:
+        # 2단 검색: 명확한 질의는 해당 규정으로 라우팅(rule-first)되고, 일반어만
+        # 겹치는 질의는 규정을 좁히지 않고 전체 검색으로 폴백해야 한다(오배제 방지).
+        routed = self.index.route_rules("전임교원 겸직 허가")
+        self.assertTrue(any("겸직" in name for name in routed))
+        results = self.index.search("전임교원 겸직 허가", k=2)
+        self.assertEqual("rule-first", results[0]["routing"])
+        # '사용·절차' 같은 일반어만으로는 라우팅이 확정되지 않는다.
+        self.assertEqual([], self.index.route_rules("사용 절차 방법 기준"))
+
     def test_integrity_matches_contract_purchase(self) -> None:
         result = self.checker.check("학과에서 소액 기자재를 여러 번 나눠서 사려고 합니다.")
         self.assertTrue(result["matched"])
