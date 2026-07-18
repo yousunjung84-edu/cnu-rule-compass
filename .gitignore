@@ -24,3 +24,8 @@ data/markdown_lineage/
 data/lineage_corpus.json
 data/ingest_ledger.json
 data/pending_review.json
+# 경진대회 발표·제출물은 공개 레포 제외(심사 전 사전 공개 방지)
+*.pptx
+*.pdf
+deck_*.html
+_deck_copy_for_voice.txt
