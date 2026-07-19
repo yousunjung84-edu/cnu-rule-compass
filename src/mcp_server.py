@@ -40,16 +40,16 @@ def search_rule(query: str, k: int = 5) -> dict:
     }
 
 
-def get_article(규정명: str, 조문번호: str, record_id: str | None = None) -> dict:
+def get_article(rule_name: str, article_no: str, record_id: str | None = None) -> dict:
     """규정명·조문번호로 단일 공식 레코드를 반환하며 record_id로 판본을 지정한다."""
-    if not isinstance(규정명, str) or not 규정명.strip() or len(규정명) > 200:
-        return _invalid_argument("규정명", "규정명은 1자 이상 200자 이하 문자열이어야 합니다.")
-    if not isinstance(조문번호, str) or not 조문번호.strip() or len(조문번호) > 50:
-        return _invalid_argument("조문번호", "조문번호는 1자 이상 50자 이하 문자열이어야 합니다.")
+    if not isinstance(rule_name, str) or not rule_name.strip() or len(rule_name) > 200:
+        return _invalid_argument("rule_name", "rule_name은 1자 이상 200자 이하 문자열이어야 합니다.")
+    if not isinstance(article_no, str) or not article_no.strip() or len(article_no) > 50:
+        return _invalid_argument("article_no", "article_no는 1자 이상 50자 이하 문자열이어야 합니다.")
     if record_id is not None and (not isinstance(record_id, str) or len(record_id) > 100):
         return _invalid_argument("record_id", "record_id는 100자 이하 문자열이어야 합니다.")
-    name = str(규정명).strip()
-    number = str(조문번호).strip().replace(" ", "")
+    name = str(rule_name).strip()
+    number = str(article_no).strip().replace(" ", "")
     search_index = get_default_index()
     matches = [
         dict(article)
@@ -68,7 +68,7 @@ def get_article(규정명: str, 조문번호: str, record_id: str | None = None)
     article = matches[0] if matches else None
     return {
         "규정명": name,
-        "조문번호": str(조문번호).strip(),
+        "조문번호": str(article_no).strip(),
         "record_id": article.get("record_id") if article else record_id,
         "revision": article.get("revision") if article else None,
         "article": article,
@@ -76,25 +76,25 @@ def get_article(규정명: str, 조문번호: str, record_id: str | None = None)
     }
 
 
-def get_article_as_of(규정명: str, 날짜: str, 키워드: str | None = None) -> dict:
+def get_article_as_of(rule_name: str, date: str, keyword: str | None = None) -> dict:
     """지정 날짜에 유효했던 판본의 조문을 반환한다(개정 계열 수집 규정 한정).
 
     감사 대응처럼 '그 업무 당시 유효 규정'이 필요한 질의를 위한 시점 질의 도구다.
     """
-    if not isinstance(규정명, str) or not 규정명.strip() or len(규정명) > 200:
-        return _invalid_argument("규정명", "규정명은 1자 이상 200자 이하 문자열이어야 합니다.")
-    if not isinstance(날짜, str) or len(날짜) != 10:
-        return _invalid_argument("날짜", f"날짜는 {_DATE_FORMAT} 형식이어야 합니다.")
-    if 키워드 is not None and (not isinstance(키워드, str) or len(키워드) > MAX_QUERY_LENGTH):
-        return _invalid_argument("키워드", f"키워드는 {MAX_QUERY_LENGTH}자 이하 문자열이어야 합니다.")
+    if not isinstance(rule_name, str) or not rule_name.strip() or len(rule_name) > 200:
+        return _invalid_argument("rule_name", "rule_name은 1자 이상 200자 이하 문자열이어야 합니다.")
+    if not isinstance(date, str) or len(date) != 10:
+        return _invalid_argument("date", f"date는 {_DATE_FORMAT} 형식이어야 합니다.")
+    if keyword is not None and (not isinstance(keyword, str) or len(keyword) > MAX_QUERY_LENGTH):
+        return _invalid_argument("keyword", f"keyword는 {MAX_QUERY_LENGTH}자 이하 문자열이어야 합니다.")
     from src.lineage import get_default_lineage
 
     lineage = get_default_lineage()
-    rule_name = lineage.resolve_rule(규정명.strip()) or 규정명.strip()
+    resolved = lineage.resolve_rule(rule_name.strip()) or rule_name.strip()
     try:
-        return lineage.articles_as_of(rule_name, 날짜.strip(), keyword=키워드)
+        return lineage.articles_as_of(resolved, date.strip(), keyword=keyword)
     except ValueError as exc:
-        return _invalid_argument("날짜", str(exc))
+        return _invalid_argument("date", str(exc))
 
 
 def create_server():
