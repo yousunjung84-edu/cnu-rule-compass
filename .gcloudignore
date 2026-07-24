@@ -1,0 +1,26 @@
+# Cloud Build 업로드 범위 — .gitignore와 별개로 관리한다.
+# (없으면 gcloud가 .gitignore를 따라 전량 코퍼스를 업로드에서 빼버린다.)
+.git/
+.venv/
+.fablize/
+__pycache__/
+*.egg-info/
+node_modules/
+skill_bridge/
+tests/
+docs/
+data/hwp/
+data/markdown/
+data/hwp_lineage/
+data/markdown_lineage/
+data/*.bak-*
+data/rules_corpus.pre_cleanup.json
+data/regulations_corpus_raw.json
+data/listing_snapshot_*.json
+data/rule_site_listing_*.json
+data/*.log
+*.hwpx
+*.pptx
+*.pdf
+deck_*.html
+*.md

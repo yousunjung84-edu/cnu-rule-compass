@@ -116,8 +116,11 @@ def get_article_as_of(rule_name: str, date: str, keyword: str | None = None) -> 
         return _invalid_argument("date", str(exc))
 
 
-def create_server():
-    """FastMCP 서버를 만들며, 패키지가 없으면 설치 안내 오류를 낸다."""
+def create_server(**settings):
+    """FastMCP 서버를 만들며, 패키지가 없으면 설치 안내 오류를 낸다.
+
+    settings는 FastMCP 생성자로 전달된다 (HTTP 진입점의 host/port/보안 설정용).
+    """
     try:
         from mcp.server.fastmcp import FastMCP
     except ImportError as exc:
@@ -126,7 +129,7 @@ def create_server():
             "python -m src.mcp_server를 실행하세요."
         ) from exc
 
-    server = FastMCP("CNU 규정 나침반")
+    server = FastMCP("CNU 규정 나침반", **settings)
     # FastMCP는 version 인자를 받지 않아(SDK 1.28 기준) serverInfo.version이
     # SDK 버전으로 보고된다 — 하위 서버에 프로젝트 버전을 직접 지정한다.
     server._mcp_server.version = SERVER_VERSION
