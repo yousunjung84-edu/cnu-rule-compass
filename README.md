@@ -48,10 +48,21 @@ python3 -m unittest discover tests/ -v
 python3 -m unittest discover -v
 ```
 
-MCP 서버만 `mcp` 패키지를 실행 시점에 지연 임포트한다.
+MCP 서버만 `mcp` 패키지를 실행 시점에 지연 임포트한다. 설치는 optional extra로 분리되어 있다
+(검증 확인 버전: `mcp` 1.28.x).
 
 ```bash
-python3 -m src.mcp_server
+python3 -m venv .venv && ./.venv/bin/pip install -e ".[mcp]"
+./.venv/bin/cnu-rule-compass-mcp        # 설치 후 — PYTHONPATH 불필요
+# 또는 저장소 루트에서: python3 -m src.mcp_server
+```
+
+Claude Code 등 MCP 클라이언트 등록:
+
+```bash
+claude mcp add --transport stdio cnu-rule-compass --scope user \
+  -- /절대경로/cnu-rule-compass/.venv/bin/cnu-rule-compass-mcp
+claude mcp list    # cnu-rule-compass: ... - ✓ Connected
 ```
 
 ## 안전 경계

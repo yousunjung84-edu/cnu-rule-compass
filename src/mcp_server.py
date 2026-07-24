@@ -6,8 +6,17 @@
 
 from __future__ import annotations
 
+import sys
+from importlib import metadata
+
 from src.search import get_default_index
 
+
+try:
+    SERVER_VERSION = metadata.version("cnu-rule-compass")
+except metadata.PackageNotFoundError:
+    # 미설치(PYTHONPATH 직접 실행) 환경 폴백 — pyproject.toml [project].version과 동기.
+    SERVER_VERSION = "1.0.0"
 
 TOOL_NAMES = ("search_rule", "get_article", "get_article_as_of")
 MAX_QUERY_LENGTH = 500
@@ -90,7 +99,17 @@ def get_article_as_of(rule_name: str, date: str, keyword: str | None = None) -> 
     from src.lineage import get_default_lineage
 
     lineage = get_default_lineage()
-    resolved = lineage.resolve_rule(rule_name.strip()) or rule_name.strip()
+    resolved = lineage.resolve_rule(rule_name.strip())
+    if resolved is None:
+        # 오확정된 규정의 조문을 유효 판본으로 인용하지 않도록, 미해결·모호
+        # 질의는 확정하지 않고 수집된 계열 목록을 함께 돌려준다.
+        return {
+            "status": "not_found",
+            "reason": "질의로 개정 계열 규정을 확정할 수 없습니다. known_rules에서 규정명을 지정해 다시 질의하세요.",
+            "rule": rule_name.strip(),
+            "date": date.strip(),
+            "known_rules": lineage.rule_names,
+        }
     try:
         return lineage.articles_as_of(resolved, date.strip(), keyword=keyword)
     except ValueError as exc:
@@ -108,6 +127,9 @@ def create_server():
         ) from exc
 
     server = FastMCP("CNU 규정 나침반")
+    # FastMCP는 version 인자를 받지 않아(SDK 1.28 기준) serverInfo.version이
+    # SDK 버전으로 보고된다 — 하위 서버에 프로젝트 버전을 직접 지정한다.
+    server._mcp_server.version = SERVER_VERSION
     server.tool(name="search_rule")(search_rule)
     server.tool(name="get_article")(get_article)
     server.tool(name="get_article_as_of")(get_article_as_of)
@@ -120,12 +142,13 @@ def main() -> int:
         get_default_index()
         server = create_server()
     except Exception as exc:
-        print(f"[오류] {exc}")
+        # stdio 전송에서 stdout은 JSON-RPC 전용 — 진단은 stderr로 보낸다.
+        print(f"[오류] {exc}", file=sys.stderr)
         return 1
     try:
         server.run()
     except Exception as exc:
-        print(f"[오류] MCP 서버 실행 실패: {exc}")
+        print(f"[오류] MCP 서버 실행 실패: {exc}", file=sys.stderr)
         return 1
     return 0
 

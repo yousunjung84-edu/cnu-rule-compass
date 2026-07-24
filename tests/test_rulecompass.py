@@ -22,17 +22,18 @@ class RuleCompassTest(unittest.TestCase):
         self.assertEqual(len(self.index.articles), len(self.index._term_frequencies))
 
     def test_search_returns_relevant_article(self) -> None:
-        results = self.index.search("전임교원 겸직 허가 절차", k=3)
+        # 픽스처는 공개 샘플 코퍼스에도 실재하는 규정으로 유지한다(신규 clone 재현성).
+        results = self.index.search("교직원 이해충돌 방지", k=3)
         self.assertTrue(results)
-        self.assertIn("겸직", results[0]["규정명"] + results[0]["본문"])
+        self.assertIn("이해충돌", results[0]["규정명"] + results[0]["본문"])
 
     def test_search_result_has_citation_fields(self) -> None:
-        result = self.index.search("정보보안 접근 권한", k=1)[0]
+        result = self.index.search("방사선 안전관리", k=1)[0]
         for field in ("규정명", "조문번호", "본문", "source_url"):
             self.assertTrue(result.get(field), field)
 
     def test_answer_quotes_original_and_source(self) -> None:
-        result = answer("전임교원 겸직 허가 절차", index=self.index, top_k=1)
+        result = answer("교직원 이해충돌 방지", index=self.index, top_k=1)
         self.assertTrue(result["answered"])
         article = result["articles"][0]
         self.assertIn(article["본문"], result["text"])
@@ -59,9 +60,9 @@ class RuleCompassTest(unittest.TestCase):
     def test_two_stage_routing(self) -> None:
         # 2단 검색: 명확한 질의는 해당 규정으로 라우팅(rule-first)되고, 일반어만
         # 겹치는 질의는 규정을 좁히지 않고 전체 검색으로 폴백해야 한다(오배제 방지).
-        routed = self.index.route_rules("전임교원 겸직 허가")
-        self.assertTrue(any("겸직" in name for name in routed))
-        results = self.index.search("전임교원 겸직 허가", k=2)
+        routed = self.index.route_rules("교직원 이해충돌 방지")
+        self.assertTrue(any("이해충돌" in name for name in routed))
+        results = self.index.search("교직원 이해충돌 방지", k=2)
         self.assertEqual("rule-first", results[0]["routing"])
         # '사용·절차' 같은 일반어만으로는 라우팅이 확정되지 않는다.
         self.assertEqual([], self.index.route_rules("사용 절차 방법 기준"))

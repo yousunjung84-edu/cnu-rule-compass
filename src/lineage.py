@@ -12,6 +12,8 @@ import json
 import re
 from pathlib import Path
 
+from src.search import _GENERIC_TERMS, _STOPWORDS
+
 _ROOT = Path(__file__).resolve().parent.parent
 # 전량 계열(lineage_corpus.json)은 로컬 전용(공개 배포 제외) — clone 환경은
 # 축약 데모 샘플로 자동 폴백한다(rules_corpus와 동일한 공개 원칙).
@@ -37,18 +39,38 @@ class LineageStore:
         return sorted(self.lineages)
 
     def resolve_rule(self, query: str) -> str | None:
-        """질의 문자열에서 계열 규정명을 찾는다(포함 → 토큰 매칭 순, 최다 일치 우선)."""
-        hits = [name for name in self.lineages if name in query or query in name]
-        if not hits:
-            tokens = [t for t in re.split(r"\s+", query) if len(t) >= 2]
-            scored = [
-                (sum(1 for t in tokens if t in name), name)
-                for name in self.lineages
-            ]
-            best = max(scored, default=(0, None))
-            if best[0] >= 1:
-                hits = [name for count, name in scored if count == best[0]]
-        return max(hits, key=len) if hits else None
+        """질의 문자열에서 계열 규정명을 찾는다(포함 → 핵심어 토큰 매칭 순).
+
+        확정은 비일반 핵심어 매칭이 있을 때만 인정한다 — '지침·운영' 같은 행정
+        일반어만 겹친 규정으로 좁히면 다른 규정의 조문을 유효 판본으로 인용하는
+        오매칭이 생긴다(search.route_rules의 H-1과 동일 원리, 가드 단일 출처 공유).
+        후보를 하나로 좁히지 못하면 임의 선택하지 않고 None을 반환해
+        상위 계층(CLI·MCP)이 모호성을 드러내게 한다.
+        """
+        query = query.strip()
+        if not query:
+            return None
+        contained = [name for name in self.lineages if name in query]
+        if contained:
+            # 질의가 규정명 전체를 포함 — 가장 구체적인(긴) 이름이 정답이다.
+            return max(contained, key=len)
+        partial = [name for name in self.lineages if query in name]
+        if partial:
+            return partial[0] if len(partial) == 1 else None
+        tokens = [
+            t for t in re.split(r"\s+", query)
+            if len(t) >= 2 and t not in _STOPWORDS and t not in _GENERIC_TERMS
+        ]
+        scored = [
+            (count, name)
+            for name in self.lineages
+            if (count := sum(1 for t in tokens if t in name)) >= 1
+        ]
+        if not scored:
+            return None
+        best = max(count for count, _ in scored)
+        hits = [name for count, name in scored if count == best]
+        return hits[0] if len(hits) == 1 else None
 
     def version_as_of(self, rule_name: str, date: str) -> dict | None:
         """rule_name 계열에서 date(YYYY-MM-DD) 시점에 유효했던 버전을 반환한다."""

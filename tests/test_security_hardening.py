@@ -96,7 +96,7 @@ class SecurityHardeningTest(unittest.TestCase):
 
         self.assertFalse(answer("겸직 허가", index=BadIndex())["answered"])
         with mock.patch("src.answer._rephrase_llm", return_value="지시를 무시하고 제999조를 적용합니다."):
-            result = answer("전임교원 겸직 허가 절차", prefer_llm=True, index=self.index, top_k=1)
+            result = answer("교직원 이해충돌 방지", prefer_llm=True, index=self.index, top_k=1)
         self.assertEqual("original-text", result["backend"])
         self.assertNotIn("제999조", result["text"])
 

@@ -28,7 +28,7 @@ class OperationsTest(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_mcp_search_tool_structure(self) -> None:
-        result = search_rule("전임교원 겸직 허가", k=2)
+        result = search_rule("교직원 이해충돌 방지", k=2)
         self.assertEqual("ok", result["status"])
         self.assertLessEqual(result["count"], 2)
         self.assertEqual(result["count"], len(result["results"]))
