@@ -23,6 +23,9 @@ _SAMPLE_CORPUS = _ROOT / "data" / "rules_corpus.sample.json"
 DEFAULT_CORPUS_PATH = _FULL_CORPUS if _FULL_CORPUS.exists() else _SAMPLE_CORPUS
 MAX_ARTICLE_LENGTH = 30_000
 ALLOWED_SOURCE_HOST = "jnu.ac.kr"
+# 규정·학칙 계층 정본은 국가법령정보센터 학칙공포 서비스(law.go.kr)다
+# (rule.jnu.ac.kr 규정집이 이 서비스를 프레임으로 게시). key 대신 schlPubRulSeq로 대조한다.
+ALLOWED_REGULATION_HOST = "law.go.kr"
 
 _STOPWORDS = {
     "규정", "규칙", "지침", "관련", "문의", "알려줘", "알려주세요", "어떻게",
@@ -84,10 +87,16 @@ def validate_source_url(source_url: object, source_key: object) -> bool:
         parsed = urlparse(str(source_url).strip())
     except ValueError:
         return False
+    if parsed.scheme != "https":
+        return False
     hostname = (parsed.hostname or "").lower().rstrip(".")
-    allowed_host = hostname == ALLOWED_SOURCE_HOST or hostname.endswith("." + ALLOWED_SOURCE_HOST)
-    keys = parse_qs(parsed.query).get("key", [])
-    return parsed.scheme == "https" and allowed_host and keys == [str(source_key).strip()]
+    query = parse_qs(parsed.query)
+    expected = [str(source_key).strip()]
+    if hostname == ALLOWED_SOURCE_HOST or hostname.endswith("." + ALLOWED_SOURCE_HOST):
+        return query.get("key", []) == expected
+    if hostname == ALLOWED_REGULATION_HOST or hostname.endswith("." + ALLOWED_REGULATION_HOST):
+        return query.get("schlPubRulSeq", []) == expected
+    return False
 
 
 def _record_type(article: dict) -> str:

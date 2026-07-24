@@ -29,3 +29,14 @@ data/pending_review.json
 *.pdf
 deck_*.html
 _deck_copy_for_voice.txt
+# 규정 계층 확장 수집(7/24) 로컬 산출물 — 코퍼스·스냅샷·로그는 공개 제외
+data/regulations_corpus_raw.json
+data/regulations_failures.jsonl
+data/collect_regulations_run*.log
+data/collect_rules.log
+data/listing_snapshot_*.json
+data/rule_site_listing_*.json
+data/*.bak-*
+skill_bridge/
+.fablize/
+*.egg-info/

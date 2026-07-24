@@ -87,6 +87,20 @@ class SecurityHardeningTest(unittest.TestCase):
         index = self._index_from([_article("1"), bad_host, bad_key])
         self.assertEqual(["1"], [row["source_key"] for row in index.articles])
 
+    def test_source_url_accepts_regulation_host_with_seq_match(self) -> None:
+        # 규정·학칙 계층 정본(law.go.kr 학칙공포)은 schlPubRulSeq로 대조한다.
+        good = _article("2200000157739")
+        good["source_url"] = (
+            "https://www.law.go.kr/LSW/schlPubRulInfoP.do"
+            "?schlPubRulSeq=2200000157739&chrClsCd=010202&urlMode=schlPubRulLsInfoP"
+        )
+        bad_seq = _article("5")
+        bad_seq["source_url"] = "https://www.law.go.kr/LSW/schlPubRulInfoP.do?schlPubRulSeq=999"
+        http_only = _article("6")
+        http_only["source_url"] = "http://www.law.go.kr/LSW/schlPubRulInfoP.do?schlPubRulSeq=6"
+        index = self._index_from([good, bad_seq, http_only])
+        self.assertEqual(["2200000157739"], [row["source_key"] for row in index.articles])
+
     def test_answer_rejects_unverified_url_and_injected_llm_output(self) -> None:
         class BadIndex:
             def search(self, query, k=3):
