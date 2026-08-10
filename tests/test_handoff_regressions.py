@@ -15,6 +15,7 @@ from src.mcp_server import (
     get_article,
     get_corpus_stats,
     get_related_articles,
+    list_articles,
     list_rules,
     search_rule,
 )
@@ -434,13 +435,18 @@ class GyeomjikDomainTest(unittest.TestCase):
             [{"clause": "②", "item": "5", "repealed_date": "2024-03-22"}], six
         )
 
-    def test_17_attachment_reason_is_tier_specific(self) -> None:
+    def test_17_22_attachment_now_resolved_in_guideline_tier(self) -> None:
+        # T22 이후 지침 계층 별표는 코퍼스에 있으므로 미수집이 아니라 **해소**된다.
+        # 규정 계층(law.go.kr)은 여전히 이미지 정본이라 미수집으로 남는다.
         guide = get_related_articles(
             get_article(self.RULE, "제9조")["record_id"], direction="outbound", resolve=False
         )
-        attachment = [e for e in guide["unresolved"] if e["kind"] == "attachment_not_collected"]
-        self.assertTrue(attachment)
-        self.assertEqual("parser_scope", attachment[0]["reason_code"])
+        resolved = [e for e in guide["outbound"] if e["kind"] == "attachment"]
+        self.assertTrue(resolved, guide)
+        self.assertTrue(resolved[0]["resolved"])
+        self.assertFalse(
+            [e for e in guide["unresolved"] if e["kind"] == "attachment_not_collected"]
+        )
         regulation = get_related_articles(
             get_article("전남대학교 학칙", "제44조")["record_id"],
             direction="outbound", resolve=False,
@@ -466,6 +472,69 @@ class GyeomjikDomainTest(unittest.TestCase):
             all(self.RULE == r["규정명"] for r in hits),
             [(r["규정명"], r["조문번호"]) for r in hits],
         )
+
+
+@unittest.skipUnless(DEFAULT_CORPUS_PATH.exists(), "코퍼스 미수집 환경")
+class V15GoldenCaseTest(unittest.TestCase):
+    """T19~T24 — v1.5 신규 골든 케이스."""
+
+    JINGGYE_4 = "rule-2200000137431-4ce6a5cd4a9fcd14"   # 학생 징계 규정 제4조
+    JINGGYE_2 = "rule-2200000137431-7678ae43c1f395c3"   # 학생 징계 규정 제2조
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.index = RuleSearchIndex()
+
+    def test_12_13_rule_level_reference_not_dropped(self) -> None:
+        for record_id in (self.JINGGYE_4, self.JINGGYE_2):
+            with self.subTest(record_id=record_id):
+                result = get_related_articles(record_id, direction="both", resolve=False)
+                refs = result["outbound"] + result["unresolved"]
+                self.assertTrue(any("인권센터" in e["raw"] for e in refs), refs)
+                self.assertTrue(any(e.get("kind") == "rule_level" for e in refs), refs)
+
+    def test_12_article_level_reference_still_resolves(self) -> None:
+        result = get_related_articles(self.JINGGYE_4, direction="both", resolve=False)
+        self.assertTrue(
+            any(e["raw"] == "제2조" and e["resolved"] for e in result["outbound"])
+        )
+
+    def test_15_16_list_articles_is_exhaustive(self) -> None:
+        result = list_articles("전남대학교 학생 징계 규정")
+        self.assertEqual(14, result["조문_수"])
+        self.assertIn("제14조", [a["조문번호"] for a in result["articles"]])
+        guide = [a["조문번호"] for a in list_articles("전남대학교 전임교원 겸직에 관한 지침")["articles"]]
+        self.assertLess(guide.index("제5조"), guide.index("제5조의2"))
+        self.assertLess(guide.index("제5조의2"), guide.index("제6조"))
+
+    def test_17_supplementary_split_from_main(self) -> None:
+        article = get_article("연구소 평가 지침", "제1조")["article"]
+        self.assertEqual("목적", article["조문제목"])
+        self.assertEqual("본칙", article["record_type"])
+
+    def test_18_no_untitled_main_article(self) -> None:
+        # 삭제 조문은 제목이 없는 것이 정상이므로 제외한다.
+        untitled = [
+            (r["규정명"], r["조문번호"])
+            for r in self.index.articles
+            if r.get("record_type") == "본칙"
+            and not str(r.get("조문제목", "")).strip()
+            and not r.get("is_repealed")
+        ]
+        self.assertEqual([], untitled)
+
+    def test_19_damaged_clause_marker_is_flagged(self) -> None:
+        article = get_article("전남대학교 학술연구진흥에관한규정", "제48조")["article"]
+        self.assertIsNotNone(article["text_integrity"])
+        self.assertIn("원문자_추정", article["text_integrity"]["kinds"])
+        self.assertTrue(article.get("clause_index_undetermined"))
+
+    def test_22_attachment_collected_for_guideline_tier(self) -> None:
+        attachments = [a for a in self.index.articles if a.get("record_type") == "별표"]
+        self.assertGreaterEqual(len(attachments), 30)
+        self.assertTrue(all(a.get("수집방법") == "auto" for a in attachments))
+        hits = self.index.search("겸직 허가절차 제출서류", k=5)
+        self.assertTrue(any(r.get("record_type") == "별표" for r in hits), hits)
 
 
 class StructureIdempotencyTest(unittest.TestCase):

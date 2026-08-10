@@ -206,6 +206,16 @@ def repealed_clauses(body: str) -> list[dict]:
     ]
 
 
+def clause_markers_damaged(body: str) -> bool:
+    """항 마커가 손상돼(`?`) 항 번호를 확정할 수 없는 조문인지 (T24).
+
+    손상 마커를 앞뒤 번호로 추론해 복원하지 않는다 — 그건 날조다. 대신
+    '항 단위 판정을 신뢰하지 말라'는 신호를 준다. 이 값이 참이면
+    repealed_clauses·repealed_items의 침묵이 '없음'이 아니라 '미상'일 수 있다.
+    """
+    return bool(_LEADING_QUESTION_RE.search(str(body)))
+
+
 def repealed_items(body: str) -> list[dict]:
     """호(號) 단위로 삭제된 목록을 반환한다 (T16).
 
@@ -318,6 +328,10 @@ class RuleSearchIndex:
             row["text_integrity"] = text_integrity(row.get("본문", ""))
             row["repealed_clauses"] = repealed_clauses(row.get("본문", ""))
             row["repealed_items"] = repealed_items(row.get("본문", ""))
+            if clause_markers_damaged(row.get("본문", "")):
+                # 항 마커가 소실돼 항 단위 판정이 침묵할 수 있다. 침묵을 '없음'으로
+                # 오해하지 않도록 미상임을 명시한다.
+                row["clause_index_undetermined"] = True
 
     def _load_corpus(self) -> list[dict]:
         try:

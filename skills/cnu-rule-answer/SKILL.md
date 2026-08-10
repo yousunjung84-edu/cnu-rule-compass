@@ -5,7 +5,7 @@ description: 'cnu-rule-compass MCP(전남대 규정·지침 코퍼스)로 학생
 
 # cnu-rule-answer
 
-> **스킬 v1.3.0 · 기준 서버 버전: cnu-rule-compass v1.4.0** (2026-08-10).
+> **스킬 v1.4.0 · 기준 서버 버전: cnu-rule-compass v1.5.0** (2026-08-10).
 > 이 문서의 도구 계약·동작 기술은 그 버전 관측이다. `get_corpus_stats`로 현재 상태를
 > 확인할 수 있다. v1.0.0에서 관측되던 색인 누락·다중어 질의 축소·꼬리 절 제목 오탐은
 > 서버에서 수정되어 이 문서에서 제거했다.
@@ -36,9 +36,21 @@ description: 'cnu-rule-compass MCP(전남대 규정·지침 코퍼스)로 학생
 | `get_article_as_of` | `rule_name: string`, `date: string`, `keyword?: string` | 특정 시점 유효 판본 (개정 계열 수집 규정 한정) |
 | `get_related_articles` | `record_id: string`, `direction?: "outbound"\|"inbound"\|"both"`, `resolve?: bool` | 상호참조 추적. 인용하는/인용받는 조문 |
 | `list_rules` | `division?: string`, `include_superseded?: bool` | 수록 규정 목록(편제·계층·조문 수·수집일시) |
+| `list_articles` | `rule_name: string`, `include_repealed?: bool`, `include_supplementary?: bool` | **한 규정의 조문 목차 전수.** 본문은 없음 |
 | `get_corpus_stats` | — | 코퍼스 규모·편제 분포·색인 정합성 |
 
 응답 최상위 `status`는 `ok` 또는 `not_found`. `count: 0`이면 검색 실패다.
+
+### `routing` 값 — 진단용이며 해석하지 않는다
+
+| 값 | 뜻 |
+|---|---|
+| `rule-first` | 1단에서 후보 규정을 좁힌 뒤 그 안에서 검색 |
+| `full-scan` | 후보를 좁히지 못해(동점 과다 등) 전체 조문 검색으로 폴백 |
+
+**신뢰도 차이를 뜻하지 않는다.** 폴백은 정답 규정을 잘못 배제하지 않으려는 안전 장치다.
+한 응답에 두 값이 섞일 수 있고, `score`는 어느 경우든 같은 방식으로 계산되므로 비교 가능하다.
+소비자가 이 필드로 판단을 바꿀 일은 없다 — 진단용이다.
 
 ### 조문 레코드의 주요 필드
 
@@ -134,6 +146,17 @@ description: 'cnu-rule-compass MCP(전남대 규정·지침 코퍼스)로 학생
 의미가 달라지지 않으므로 `text_integrity`로 표시하지 않는다.
 **인용할 때 `각 호의 1`로 고쳐 쓰지 않는다** — 오타처럼 보여도 원문이다.
 
+#### 항 마커가 손상된 조문 — 항 단위 인용을 신뢰하지 않는다
+
+`text_integrity.kinds`에 `원문자_추정`이 있으면 **항 번호(①②③)가 소실**된 조문이다
+(예: 학술연구진흥에관한규정 제48조의 제3항). 서버는 `clause_index_undetermined: true`로
+표시한다. 이 경우:
+
+- `repealed_clauses`·`repealed_items`가 비어 있어도 **"삭제된 항이 없다"는 뜻이 아니다.**
+  판정이 침묵한 것이므로 단정하지 않는다.
+- "제3항에 따라"처럼 **항을 특정해 인용하지 않는다.** 조문 전체를 인용하고
+  항 구분은 원문 확인을 안내한다.
+
 ### B. 관련성 심사 — 키워드 오탐은 여전히 온다
 
 `search_rule`은 점수 기반이라 **주제가 달라도 단어가 겹치면 상위에 올라온다.**
@@ -187,7 +210,10 @@ get_related_articles(record_id, direction="both")
 | `same_rule` | 같은 규정 안 조문 | 같이 인용 |
 | `external_law` | 국가 법령 등 코퍼스 밖 | **조문 내용을 지어내지 않는다.** 법령명을 밝히고 국가법령정보센터 확인을 안내 |
 | `external_law_unmatched` | 법령·외부 규정으로 보이나 사전 미등재 | 위와 같게 다루되 "확인 필요" 표현을 쓴다 |
-| `attachment_not_collected` | 별표·서식 위임 | §7-A "규정에 없는 부분"과 **구별해** 미수집으로 밝힌다 (`reason_code` 참조) |
+| `rule_level` | 조문 없이 **규정 전체**를 지목 | 그 규정도 함께 확인한다. `resolved: false`는 조문 단위 해소만 없다는 뜻 |
+| `external_rule_unmatched` | 규정 전체 지목인데 코퍼스에 없음 | 코퍼스 밖으로 안내 |
+| `attachment` | 별표·서식이 **코퍼스에 있음**(지침 계층) | 해소된 별표를 근거로 인용할 수 있다 |
+| `attachment_not_collected` | 별표·서식 위임인데 미수집 | §7-A "규정에 없는 부분"과 **구별해** 미수집으로 밝힌다 (`reason_code` 참조) |
 
 `reason_code`: `image_only`(정본이 이미지로 제공) / `parser_scope`(원문에는 있으나 수집 범위 밖).
 어느 쪽이든 내용을 추정해 채우지 않는다.
@@ -220,6 +246,13 @@ get_related_articles(record_id, direction="both")
 2. **상호참조 추적** — 검색된 조문에 대해 `get_related_articles`를 돌렸는가. (§5-C)
 3. **상위 규정 직접 조회** — 학칙·교학규정 등 상위 규정에 대해 `get_article`을 시도했는가.
    `제○조의2` 형태도 확인했는가.
+4. **전수 확인이 필요하면 `list_articles`를 호출했는가.**
+
+> ⚠️ **검색 결과만으로 "전 조문을 확인했다"고 쓰지 않는다.** `search_rule`은 상위 k건만
+> 반환하므로 전수를 보장하지 않는다. 실제로 학생 징계 규정을 "제2조~제13조 전부 확인"이라
+> 답했다가 **제14조(준용 — 교수회의 징계 트랙)를 통째로 빠뜨린 사고**가 있었다.
+> 전수가 필요하면 `list_articles`로 목차를 받고, 받지 않았으면
+> **"일부 조문은 확인하지 않았다"** 고 밝힌다.
 
 셋 중 하나라도 건너뛴 상태라면, 부존재를 언급하지 말고 **탐색을 계속한다.**
 그래도 답을 내야 하는 상황이면 "현재까지 확인하지 못했다"고만 쓰고

@@ -16,7 +16,7 @@ try:
     SERVER_VERSION = metadata.version("cnu-rule-compass")
 except metadata.PackageNotFoundError:
     # 미설치(PYTHONPATH 직접 실행) 환경 폴백 — pyproject.toml [project].version과 동기.
-    SERVER_VERSION = "1.4.0"
+    SERVER_VERSION = "1.5.0"
 
 TOOL_NAMES = (
     "search_rule",
@@ -24,6 +24,7 @@ TOOL_NAMES = (
     "get_article_as_of",
     "get_related_articles",
     "list_rules",
+    "list_articles",
     "get_corpus_stats",
 )
 _REFERENCE_INDEX = None
@@ -182,6 +183,77 @@ def list_rules(division: str | None = None, include_superseded: bool = False) ->
     return {"count": len(rules), "rules": rules, "status": "ok" if rules else "not_found"}
 
 
+_ARTICLE_NO_RE = None
+
+
+def _article_sort_key(article_no: str) -> tuple[int, int]:
+    """'제11조의2'가 제11조와 제12조 사이에 오도록 정렬한다."""
+    import re as _re
+
+    match = _re.match(r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?", str(article_no))
+    if not match:
+        return (10**6, 0)
+    return (int(match.group(1)), int(match.group(2) or 0))
+
+
+def list_articles(
+    rule_name: str,
+    include_repealed: bool = False,
+    include_supplementary: bool = False,
+) -> dict:
+    """한 규정의 조문 목차를 전수 반환한다 (T20).
+
+    search_rule은 관련도 상위 k건만 주므로 '전 조문을 확인했다'는 주장의 근거가 될 수
+    없다. 실제로 그 주장을 했다가 학생 징계 규정 제14조(준용 — 교수회의 트랙)를
+    통째로 빠뜨린 사고가 있었다. 본문은 넣지 않는다(토큰 절약) — 필요한 조문은
+    get_article로 가져간다.
+    """
+    if not isinstance(rule_name, str) or not rule_name.strip() or len(rule_name) > 200:
+        return _invalid_argument("rule_name", "rule_name은 1자 이상 200자 이하 문자열이어야 합니다.")
+    for name, flag in (("include_repealed", include_repealed), ("include_supplementary", include_supplementary)):
+        if not isinstance(flag, bool):
+            return _invalid_argument(name, f"{name}은(는) 참/거짓이어야 합니다.")
+
+    target = rule_name.strip()
+    rows = [row for row in get_default_index().articles if row.get("규정명") == target]
+    if not rows:
+        return {
+            "규정명": target,
+            "status": "not_found",
+            "reason": "해당 규정명의 조문이 코퍼스에 없습니다. list_rules로 정확한 규정명을 확인하세요.",
+        }
+
+    supplementary = [row for row in rows if row.get("record_type") == "부칙"]
+    main = [row for row in rows if row.get("record_type") != "부칙"]
+    selected = main + (supplementary if include_supplementary else [])
+    if not include_repealed:
+        selected = [row for row in selected if not row.get("is_repealed")]
+    selected.sort(key=lambda row: (
+        row.get("record_type") == "부칙", _article_sort_key(row.get("조문번호", ""))
+    ))
+    return {
+        "규정명": target,
+        "source_key": rows[0].get("source_key"),
+        "편제": rows[0].get("편제"),
+        "조문_수": len([r for r in main if include_repealed or not r.get("is_repealed")]),
+        "부칙_수": len(supplementary),
+        "수집일시": rows[0].get("수집일시"),
+        "articles": [
+            {
+                "조문번호": row.get("조문번호"),
+                "조문제목": row.get("조문제목"),
+                "record_id": row.get("record_id"),
+                "record_type": row.get("record_type"),
+                "장": row.get("장"),
+                "절": row.get("절"),
+                "is_repealed": row.get("is_repealed", False),
+            }
+            for row in selected
+        ],
+        "status": "ok",
+    }
+
+
 def get_corpus_stats() -> dict:
     """코퍼스 규모·분포와 색인 정합성을 반환한다 (T1 재발 감시용)."""
     index = get_default_index()
@@ -300,6 +372,7 @@ def create_server(**settings):
     server.tool(name="get_article_as_of")(get_article_as_of)
     server.tool(name="get_related_articles")(get_related_articles)
     server.tool(name="list_rules")(list_rules)
+    server.tool(name="list_articles")(list_articles)
     server.tool(name="get_corpus_stats")(get_corpus_stats)
     return server
 

@@ -59,6 +59,23 @@ _TRAILING_PARTICLE_RE = re.compile(
 )
 
 
+# 조문번호 없이 규정 전체를 지목하는 참조 (T19).
+# '「전남대학교 인권센터 규정」에 의한 조사 결과는 …' 처럼 흔한 형태인데,
+# 조문 패턴을 필수로 요구하던 추출기가 통째로 흘려보냈다 — 놓친 줄도 모르는 누락이다.
+_RULE_LEVEL_RE = re.compile(
+    # ① 낫표로 감싼 이름  ② 감싸지 않았으나 규정·법령 접미사로 끝나는 이름
+    r"(?:[「｢『《]\s*(?P<quoted_name>[^」｣』》]{2,50}?)\s*[」｣』》]"
+    r"|(?P<plain_name>[가-힣A-Za-z0-9·ㆍ]{3,30}(?:규정|지침|학칙|규칙|세칙|법률|법|시행령|시행규칙|조례|정관)))"
+    # 뒤에 조문이 오면 조문 단위 참조이므로 여기서 잡지 않는다
+    r"(?!\s*(?:부칙\s*)?제\s*\d+\s*조)"
+    # '「업무 정보화」란 …' 같은 용어 정의는 규정 참조가 아니다
+    r"(?!\s*(?:이)?란|\s*이라\s*함은|\s*이라\s*한다)"
+)
+# 접미사만 보면 잡히지만 규정명이 아닌 말
+_NOT_A_RULE_NAME = {
+    "관련 규정", "관계 규정", "이 규정", "본 규정", "해당 규정", "관련 지침", "이 지침",
+    "관계 법령", "관련 법령", "이 학칙", "본 학칙", "제 규정", "각종 규정", "타 규정",
+}
 # 별표·별지서식 위임 표기
 _ATTACHMENT_RE = re.compile(
     r"별표\s*\d+(?:의\s*\d+)?|별지\s*서식\s*제\s*\d+\s*호|별지\s*제\s*\d+\s*호\s*서식|별표(?=\s*와\s*같)"
@@ -88,6 +105,13 @@ class ReferenceIndex:
             short = name.replace("전남대학교", "").strip()
             if short:
                 self._alias.setdefault(short, name)
+        # 본문은 띄어쓰기를 자주 생략한다('전남대학교학칙', '전남대보안규정').
+        # 공백 제거형도 별칭으로 넣어 같은 규정으로 해소한다.
+        for alias, target in list(self._alias.items()):
+            self._alias.setdefault(alias.replace(" ", ""), target)
+        self._rule_source_key = {
+            row["규정명"]: row.get("source_key") for row in articles
+        }
         self._inbound: dict[str, list[dict]] | None = None
 
     def _resolve_rule(
@@ -157,12 +181,68 @@ class ReferenceIndex:
             if key in seen:
                 continue
             seen.add(key)
+            # T22 이후 지침 계층 별표는 코퍼스에 있다. 있으면 해소해서 돌려준다.
+            target = self._by_key.get((current_rule, raw_text)) or (
+                self._by_key.get((current_rule, "별표")) if raw_text.startswith("별표") else None
+            )
+            if target is not None:
+                entry = {
+                    "raw": raw_text,
+                    "target_rule": current_rule,
+                    "target_article": target["조문번호"],
+                    "target_clause": None,
+                    "kind": "attachment",
+                    "resolved": True,
+                    "record_id": target["record_id"],
+                }
+                if resolve:
+                    entry["article"] = target
+                found.append(entry)
+                continue
             unresolved.append({
                 "raw": raw_text,
                 "kind": "attachment_not_collected",
                 "reason_code": reason_code,
                 "reason": reason_text,
             })
+
+        # 규정명만 지목하는 참조 (T19). 조문 단위 해소는 불가하므로 resolved=False로
+        # 두되, 참조가 있었다는 사실은 반드시 남긴다.
+        for match in _RULE_LEVEL_RE.finditer(body):
+            name = (match.group("quoted_name") or match.group("plain_name") or "").strip()
+            if not name or name in _NOT_A_RULE_NAME or name in _VAGUE_PREFIX:
+                continue
+            raw_text = " ".join(match.group(0).split())
+            resolved_name = self._alias.get(name) or self._alias.get(name.replace(" ", ""))
+            if resolved_name is None:
+                stripped = _TRAILING_PARTICLE_RE.sub("", name)
+                resolved_name = self._alias.get(stripped) or self._alias.get(stripped.replace(" ", ""))
+            if resolved_name == current_rule:
+                continue  # 자기 규정을 이름으로 부른 것뿐이다
+            key = ("rule_level", name)
+            if key in seen:
+                continue
+            seen.add(key)
+            if resolved_name:
+                entry = {
+                    "raw": raw_text,
+                    "target_rule": resolved_name,
+                    "target_article": None,
+                    "target_clause": None,
+                    "kind": "rule_level",
+                    "resolved": False,  # 규정 전체 지목이라 조문 단위 해소는 없다
+                    "record_id": None,
+                    "source_key": self._rule_source_key.get(resolved_name),
+                }
+                if resolve:
+                    entry["article"] = None
+                found.append(entry)
+            else:
+                unresolved.append({
+                    "raw": raw_text,
+                    "kind": "external_rule_unmatched",
+                    "reason": "규정 전체를 지목하는 참조이나 코퍼스에 해당 규정이 없습니다.",
+                })
 
         for match in _REFERENCE_RE.finditer(body):
             raw_name = match.group("quoted") or match.group("plain")

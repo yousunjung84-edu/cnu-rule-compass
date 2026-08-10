@@ -48,6 +48,7 @@ class OperationsTest(unittest.TestCase):
                 "get_article_as_of",
                 "get_related_articles",
                 "list_rules",
+                "list_articles",
                 "get_corpus_stats",
             ),
             TOOL_NAMES,
