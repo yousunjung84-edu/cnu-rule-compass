@@ -41,7 +41,17 @@ class OperationsTest(unittest.TestCase):
         self.assertEqual("ok", result["status"])
         self.assertEqual(original["본문"], result["article"]["본문"])
         self.assertEqual(result["record_id"], result["article"]["record_id"])
-        self.assertEqual(("search_rule", "get_article", "get_article_as_of"), TOOL_NAMES)
+        self.assertEqual(
+            (
+                "search_rule",
+                "get_article",
+                "get_article_as_of",
+                "get_related_articles",
+                "list_rules",
+                "get_corpus_stats",
+            ),
+            TOOL_NAMES,
+        )
 
     def test_pii_redaction(self) -> None:
         masked, kinds = redact("학번 2024123456, 전화 010-1234-5678, a@jnu.ac.kr")

@@ -16,9 +16,17 @@ try:
     SERVER_VERSION = metadata.version("cnu-rule-compass")
 except metadata.PackageNotFoundError:
     # 미설치(PYTHONPATH 직접 실행) 환경 폴백 — pyproject.toml [project].version과 동기.
-    SERVER_VERSION = "1.0.0"
+    SERVER_VERSION = "1.1.0"
 
-TOOL_NAMES = ("search_rule", "get_article", "get_article_as_of")
+TOOL_NAMES = (
+    "search_rule",
+    "get_article",
+    "get_article_as_of",
+    "get_related_articles",
+    "list_rules",
+    "get_corpus_stats",
+)
+_REFERENCE_INDEX = None
 MAX_QUERY_LENGTH = 500
 _DATE_FORMAT = "YYYY-MM-DD"
 
@@ -30,8 +38,17 @@ def _invalid_argument(field: str, message: str) -> dict:
     }
 
 
-def search_rule(query: str, k: int = 5) -> dict:
-    """자연어 질의와 관련된 공식 규정 조문을 반환한다."""
+def search_rule(
+    query: str,
+    k: int = 5,
+    include_superseded: bool = False,
+    include_repealed: bool = False,
+) -> dict:
+    """자연어 질의와 관련된 공식 규정 조문을 반환한다.
+
+    기본값은 현행·유효 조문만이다. 구판본(is_current=false)이나 삭제된 조문
+    (is_repealed=true)은 감사 대응 등 필요한 경우에만 include_* 로 켠다.
+    """
     if not isinstance(query, str) or not query.strip():
         return _invalid_argument("query", "query는 비어 있지 않은 문자열이어야 합니다.")
     if len(query) > MAX_QUERY_LENGTH:
@@ -40,13 +57,35 @@ def search_rule(query: str, k: int = 5) -> dict:
         return _invalid_argument("k", "k는 정수여야 합니다.")
     if not 1 <= k <= 20:
         return _invalid_argument("k", "k는 1 이상 20 이하여야 합니다.")
-    results = get_default_index().search(query, k=k)
-    return {
+    for name, flag in (("include_superseded", include_superseded), ("include_repealed", include_repealed)):
+        if not isinstance(flag, bool):
+            return _invalid_argument(name, f"{name}은(는) 참/거짓이어야 합니다.")
+    index = get_default_index()
+    results = index.search(
+        query, k=k, include_superseded=include_superseded, include_repealed=include_repealed
+    )
+    response = {
         "query": query,
         "count": len(results),
         "results": results,
         "status": "ok" if results else "not_found",
     }
+    if len(results) <= 1:
+        # 결과가 없거나 빈약할 때, 그것이 '코퍼스에 개념 부재'인지 '검색 실패'인지
+        # 소비자가 구별할 수 있게 근거를 준다 (T7).
+        from src.search import unmatched_query_terms
+
+        unmatched = unmatched_query_terms(query, index)
+        response["hints"] = {
+            "query_terms_unmatched": unmatched,
+            "suggest": "no_such_concept" if unmatched else "cross_reference",
+            "note": (
+                "질의어가 코퍼스 어휘에 없습니다. 해당 개념을 다루는 규정이 수집 범위에 없을 수 있습니다."
+                if unmatched
+                else "어휘는 코퍼스에 있으나 결과가 빈약합니다. get_related_articles로 상호참조를 따라가 보세요."
+            ),
+        }
+    return response
 
 
 def get_article(rule_name: str, article_no: str, record_id: str | None = None) -> dict:
@@ -116,6 +155,111 @@ def get_article_as_of(rule_name: str, date: str, keyword: str | None = None) -> 
         return _invalid_argument("date", str(exc))
 
 
+def list_rules(division: str | None = None, include_superseded: bool = False) -> dict:
+    """수집된 규정 목록을 반환한다 (T6 — 정적 코퍼스 지도를 대체한다)."""
+    if division is not None and (not isinstance(division, str) or len(division) > 100):
+        return _invalid_argument("division", "division은 100자 이하 문자열이어야 합니다.")
+    if not isinstance(include_superseded, bool):
+        return _invalid_argument("include_superseded", "include_superseded는 참/거짓이어야 합니다.")
+
+    grouped: dict[str, dict] = {}
+    for row in get_default_index().articles:
+        if not include_superseded and not row.get("is_current", True):
+            continue
+        if division and division not in str(row.get("편제", "")):
+            continue
+        entry = grouped.setdefault(row["규정명"], {
+            "규정명": row["규정명"],
+            "편제": row.get("편제"),
+            "source_key": row.get("source_key"),
+            "계층": "규정" if str(row.get("편제", "")).startswith("규정집/") else "지침",
+            "조문_수": 0,
+            "수집일시": row.get("수집일시"),
+            "is_current": row.get("is_current", True),
+        })
+        entry["조문_수"] += 1
+    rules = sorted(grouped.values(), key=lambda row: (str(row["편제"]), row["규정명"]))
+    return {"count": len(rules), "rules": rules, "status": "ok" if rules else "not_found"}
+
+
+def get_corpus_stats() -> dict:
+    """코퍼스 규모·분포와 색인 정합성을 반환한다 (T1 재발 감시용)."""
+    index = get_default_index()
+    articles = index.articles
+    divisions: dict[str, int] = {}
+    for row in articles:
+        divisions[str(row.get("편제", ""))] = divisions.get(str(row.get("편제", "")), 0) + 1
+    collected = sorted(str(row.get("수집일시", "")) for row in articles if row.get("수집일시"))
+    indexed = len(index._term_frequencies)
+    stats = {
+        "규정_수": len({row["규정명"] for row in articles}),
+        "조문_수": len(articles),
+        "색인_문서_수": indexed,
+        "제외_레코드_수": len(index.rejected_articles),
+        "편제별_분포": dict(sorted(divisions.items(), key=lambda kv: -kv[1])),
+        "최초_수집일시": collected[0] if collected else None,
+        "최신_수집일시": collected[-1] if collected else None,
+        "구판본_조문_수": sum(1 for row in articles if not row.get("is_current", True)),
+        "삭제_조문_수": sum(1 for row in articles if row.get("is_repealed", False)),
+        "status": "ok",
+    }
+    if indexed != len(articles):
+        stats["warning"] = f"색인({indexed})과 레코드({len(articles)}) 수가 다릅니다 — 색인 재빌드 필요"
+    return stats
+
+
+def _reference_index():
+    """참조 그래프는 만드는 비용이 있어 프로세스당 한 번만 만든다."""
+    global _REFERENCE_INDEX
+    if _REFERENCE_INDEX is None:
+        from src.references import ReferenceIndex
+
+        _REFERENCE_INDEX = ReferenceIndex(get_default_index().articles)
+    return _REFERENCE_INDEX
+
+
+def get_related_articles(
+    record_id: str, direction: str = "outbound", resolve: bool = True
+) -> dict:
+    """조문이 인용하는(또는 조문을 인용하는) 다른 조문을 반환한다.
+
+    감사·행정 문의는 조문 하나로 끝나지 않고 인용 사슬을 따라가야 하는 경우가 많다.
+    해소하지 못한 참조는 버리지 않고 unresolved에 사유와 함께 담는다.
+    """
+    if not isinstance(record_id, str) or not record_id.strip() or len(record_id) > 100:
+        return _invalid_argument("record_id", "record_id는 1자 이상 100자 이하 문자열이어야 합니다.")
+    if direction not in {"outbound", "inbound", "both"}:
+        return _invalid_argument("direction", "direction은 outbound, inbound, both 중 하나여야 합니다.")
+    if not isinstance(resolve, bool):
+        return _invalid_argument("resolve", "resolve는 참/거짓이어야 합니다.")
+
+    index = _reference_index()
+    record = index.get(record_id.strip())
+    if record is None:
+        return {
+            "record_id": record_id.strip(),
+            "status": "not_found",
+            "reason": "해당 record_id의 조문이 코퍼스에 없습니다.",
+        }
+
+    outbound: list[dict] = []
+    unresolved: list[dict] = []
+    inbound: list[dict] = []
+    if direction in {"outbound", "both"}:
+        outbound, unresolved = index.outbound(record, resolve=resolve)
+    if direction in {"inbound", "both"}:
+        inbound = index.inbound(record_id.strip(), resolve=resolve)
+    return {
+        "record_id": record_id.strip(),
+        "규정명": record.get("규정명"),
+        "조문번호": record.get("조문번호"),
+        "outbound": outbound,
+        "inbound": inbound,
+        "unresolved": unresolved,
+        "status": "ok",
+    }
+
+
 def create_server(**settings):
     """FastMCP 서버를 만들며, 패키지가 없으면 설치 안내 오류를 낸다.
 
@@ -136,6 +280,9 @@ def create_server(**settings):
     server.tool(name="search_rule")(search_rule)
     server.tool(name="get_article")(get_article)
     server.tool(name="get_article_as_of")(get_article_as_of)
+    server.tool(name="get_related_articles")(get_related_articles)
+    server.tool(name="list_rules")(list_rules)
+    server.tool(name="get_corpus_stats")(get_corpus_stats)
     return server
 
 

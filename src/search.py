@@ -22,6 +22,8 @@ _FULL_CORPUS = _ROOT / "data" / "rules_corpus.json"
 _SAMPLE_CORPUS = _ROOT / "data" / "rules_corpus.sample.json"
 DEFAULT_CORPUS_PATH = _FULL_CORPUS if _FULL_CORPUS.exists() else _SAMPLE_CORPUS
 MAX_ARTICLE_LENGTH = 30_000
+# 라우팅 동점 확장 상한 — 이보다 넓어지면 좁히는 의미가 없어 전체 검색으로 폴백한다.
+ROUTE_TIE_LIMIT = 30
 ALLOWED_SOURCE_HOST = "jnu.ac.kr"
 # 규정·학칙 계층 정본은 국가법령정보센터 학칙공포 서비스(law.go.kr)다
 # (rule.jnu.ac.kr 규정집이 이 서비스를 프레임으로 게시). key 대신 schlPubRulSeq로 대조한다.
@@ -31,6 +33,10 @@ _STOPWORDS = {
     "규정", "규칙", "지침", "관련", "문의", "알려줘", "알려주세요", "어떻게",
     "무엇", "뭐야", "되나요", "있나요", "대한", "관한", "경우", "사항", "전남대학교",
     "어떤", "다른", "필요한가요", "하려면", "절차가", "인가요",
+    # 자연어 문의의 의문 표현 — 변별력이 없는데 커버리지 분모만 키운다
+    # ('성적 이의신청 언제까지'가 1/3로 잘리던 문제).
+    "언제", "언제까지", "얼마나", "어디", "어디서", "누구", "누가", "하나요",
+    "할까요", "되는지", "가능한가요", "알려주실", "궁금합니다", "문의드립니다",
 }
 _PARTICLES = (
     "으로부터", "에서부터", "에게서", "까지는", "에서는", "으로는", "에게는",
@@ -99,6 +105,26 @@ def validate_source_url(source_url: object, source_key: object) -> bool:
     return False
 
 
+# 구판본 규정명 표기: '수업관리 지침(2012. 12. 26. 제정)', '… 규정(폐지)'
+_SUPERSEDED_NAME_RE = re.compile(r"^(?P<base>.+?)\s*\((?P<note>[^)]*(?:제정|개정|폐지)[^)]*)\)\s*$")
+# 삭제된 조문: 본문이 '삭제' 또는 '<삭제 2013. 7. 5.>'로 시작한다.
+_REPEALED_RE = re.compile(r"^\s*<?\s*삭제\s*(?P<date>\d{4}\.\s*\d{1,2}\.\s*\d{1,2}\.?)?")
+
+
+def _repeal_info(body: str) -> tuple[bool, str | None]:
+    match = _REPEALED_RE.match(str(body))
+    if not match:
+        return False, None
+    raw = match.group("date")
+    if not raw:
+        return True, None
+    parts = [part.strip() for part in raw.split(".") if part.strip()]
+    if len(parts) < 3:
+        return True, None
+    year, month, day = parts[:3]
+    return True, f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+
 def _record_type(article: dict) -> str:
     title = str(article.get("조문제목", "")).strip()
     body = str(article.get("본문", "")).lstrip()
@@ -140,6 +166,35 @@ class RuleSearchIndex:
         self._postings: dict[str, set[int]] = defaultdict(set)
         self._build()
 
+    @staticmethod
+    def _annotate_versions(articles: list[dict]) -> None:
+        """판본·폐지 메타를 붙인다 (T5).
+
+        구판본은 규정명 괄호 표기('수업관리 지침(2012. 12. 26. 제정)')로 구분한다.
+        같은 이름의 현행 규정이 코퍼스에 있을 때만 구판본으로 인정하고, 대체 레코드는
+        현행 규정의 같은 조문번호로 잡는다. 소비자가 규정명 문자열을 눈으로 보고
+        구판본을 추정하던 휴리스틱을 필드로 대체하는 것이 목적이다.
+        """
+        current_names = {
+            row["규정명"] for row in articles if not _SUPERSEDED_NAME_RE.match(row["규정명"])
+        }
+        current_by_key = {
+            (row["규정명"], str(row["조문번호"])): row["record_id"]
+            for row in articles
+            if row["규정명"] in current_names
+        }
+        for row in articles:
+            match = _SUPERSEDED_NAME_RE.match(row["규정명"])
+            base = match.group("base").strip() if match else None
+            is_superseded = bool(base and base in current_names)
+            row["is_current"] = not is_superseded
+            row["superseded_by"] = (
+                current_by_key.get((base, str(row["조문번호"]))) if is_superseded else None
+            )
+            repealed, repealed_date = _repeal_info(row.get("본문", ""))
+            row["is_repealed"] = repealed
+            row["repealed_date"] = repealed_date
+
     def _load_corpus(self) -> list[dict]:
         try:
             with self.corpus_path.open(encoding="utf-8") as file:
@@ -172,6 +227,7 @@ class RuleSearchIndex:
             accepted.append(prepared)
         if not accepted:
             raise ValueError("유효한 규정 조문이 없습니다.")
+        self._annotate_versions(accepted)
         return accepted
 
     def _build(self) -> None:
@@ -223,6 +279,12 @@ class RuleSearchIndex:
         보수적으로 동작한다: 완전형(비 gram) 토큰이 하나도 안 겹치는 규정은 후보에서
         제외하고, 아무 규정도 못 좁히면 빈 목록을 반환해 호출부가 전체 검색으로
         폴백하게 한다(정답 규정을 잘못 배제하는 것이 오매칭보다 나쁘기 때문).
+
+        top_r 경계의 **동점 후보는 함께 통과**시킨다. 단순히 상위 top_r만 자르면
+        점수가 같은데도 규정명 사전순으로 밀린 규정이 조용히 배제된다
+        ('재입학' 질의에서 동점 9건 중 학칙이 8번째로 잘려 제30조가 사라진 사고).
+        동점 확장이 ROUTE_TIE_LIMIT을 넘으면 라우팅이 변별력을 잃은 것이므로
+        빈 목록을 반환해 전체 검색으로 넘긴다.
         """
         query_terms = Counter(tokenize(query))
         if not query_terms:
@@ -243,29 +305,56 @@ class RuleSearchIndex:
             if core_hit and score > 0:
                 scored.append((score, name))
         scored.sort(key=lambda row: (-row[0], row[1]))
-        return [name for _, name in scored[:top_r]]
+        if len(scored) <= top_r:
+            return [name for _, name in scored]
+        cutoff = scored[top_r - 1][0]
+        tied = [name for score, name in scored if score >= cutoff]
+        return [] if len(tied) > ROUTE_TIE_LIMIT else tied
 
-    def search(self, query: str, k: int = 5) -> list[dict]:
+    def _version_filter(self, include_superseded: bool, include_repealed: bool) -> set[int] | None:
+        """기본은 현행·유효 조문만 본다. 구판본·삭제 조문을 근거로 인용하면 사고다."""
+        if include_superseded and include_repealed:
+            return None
+        allowed = {
+            doc_id
+            for doc_id, row in enumerate(self.articles)
+            if (include_superseded or row.get("is_current", True))
+            and (include_repealed or not row.get("is_repealed", False))
+        }
+        return allowed
+
+    def search(
+        self,
+        query: str,
+        k: int = 5,
+        include_superseded: bool = False,
+        include_repealed: bool = False,
+    ) -> list[dict]:
         """관련 조문 상위 k개를 인용 필드와 점수와 함께 반환한다 (2단 검색).
 
         1단에서 후보 규정을 좁히고(route_rules) 2단에서 그 규정들의 조문만 검색한다.
         1단이 아무 규정도 못 좁히거나 2단 결과가 비면 전체 조문 검색으로 폴백한다.
         검색어와 실질 토큰이 하나도 겹치지 않으면 빈 목록을 반환한다. 따라서 호출부는
         낮은 관련성 결과를 근거로 오인하지 않고 '해당 규정 미확인'으로 처리할 수 있다.
+
+        기본값은 현행·유효 조문만이다. 감사 대응처럼 구판본이 필요하면 켠다.
         """
         if not isinstance(query, str) or not query.strip() or k <= 0:
             return []
+        allowed = self._version_filter(include_superseded, include_repealed)
         routed = self.route_rules(query)
         if routed:
             routed_ids: set[int] = set()
             for name in routed:
                 routed_ids.update(self._rule_docs.get(name, ()))
-            results = self._search_articles(query, k, restrict_ids=routed_ids)
+            if allowed is not None:
+                routed_ids &= allowed
+            results = self._search_articles(query, k, restrict_ids=routed_ids) if routed_ids else []
             if results:
                 for row in results:
                     row["routing"] = "rule-first"
                 return results
-        results = self._search_articles(query, k, restrict_ids=None)
+        results = self._search_articles(query, k, restrict_ids=allowed)
         for row in results:
             row["routing"] = "full-scan"
         return results
@@ -322,13 +411,20 @@ class RuleSearchIndex:
             # 40% 비율 AND 핵심어 최소 1개 완전매칭을 함께 요구한다.
             matched_concepts = 0
             matched_core = 0
+            core_words = 0
             for word in query_words:
                 forms = {form for form in _word_forms(word) if not form.startswith("#")}
+                is_core = not (forms & _GENERIC_TERMS)
+                core_words += is_core
                 if any(frequencies.get(form) for form in forms):
                     matched_concepts += 1
-                    if not (forms & _GENERIC_TERMS):
-                        matched_core += 1
-            coverage = matched_concepts / len(query_words)
+                    matched_core += is_core
+            # 비율의 분모는 **핵심어만** 센다. 일반 행정어를 분모에 넣으면 자연어 질의가
+            # 길어질수록 정답이 탈락한다('재입학 허가 신청'에서 학칙 제30조가 1/3=0.33로
+            # 잘리던 문제). 핵심어가 하나도 없는 질의는 종전대로 전체 비율로 판정한다.
+            coverage = (
+                matched_core / core_words if core_words else matched_concepts / len(query_words)
+            )
             if score > 0 and coverage >= 0.4 and matched_core >= 1:
                 scores.append((score, doc_id, sorted(set(matched_words))))
 
@@ -356,3 +452,18 @@ def get_default_index() -> RuleSearchIndex:
 def search(query: str, k: int = 5) -> list[dict]:
     """기본 인덱스 검색 편의 함수."""
     return get_default_index().search(query, k=k)
+
+
+def unmatched_query_terms(query: str, index: "RuleSearchIndex | None" = None) -> list[str]:
+    """코퍼스 어휘집에 아예 없는 질의어를 돌려준다 (T7).
+
+    '검색이 실패한 것'과 '코퍼스에 그 개념 자체가 없는 것'은 소비자에게 전혀 다른
+    상황이다(전자는 우회 탐색, 후자는 '규정 없음' 판정). 그 구분의 근거를 준다.
+    """
+    index = index or get_default_index()
+    unmatched: list[str] = []
+    for word in _query_words(query):
+        forms = {form for form in _word_forms(word) if not form.startswith("#")}
+        if not any(form in index._postings for form in forms):
+            unmatched.append(word)
+    return unmatched

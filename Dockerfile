@@ -5,7 +5,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir "mcp>=1.20"
+# 상한을 반드시 둔다: mcp 2.0.0은 mcp.server.fastmcp를 없애 서버가 기동하지 않는다
+# (2026-08-10 배포 실패로 확인). 검증 버전은 1.28.1.
+RUN pip install --no-cache-dir "mcp>=1.20,<2"
 
 COPY src ./src
 COPY data/rules_corpus.json data/lineage_corpus.json data/integrity_selfcheck_samples.json ./data/
