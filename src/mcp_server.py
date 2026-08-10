@@ -16,7 +16,7 @@ try:
     SERVER_VERSION = metadata.version("cnu-rule-compass")
 except metadata.PackageNotFoundError:
     # 미설치(PYTHONPATH 직접 실행) 환경 폴백 — pyproject.toml [project].version과 동기.
-    SERVER_VERSION = "1.1.0"
+    SERVER_VERSION = "1.2.0"
 
 TOOL_NAMES = (
     "search_rule",
@@ -201,6 +201,7 @@ def get_corpus_stats() -> dict:
         "최신_수집일시": collected[-1] if collected else None,
         "구판본_조문_수": sum(1 for row in articles if not row.get("is_current", True)),
         "삭제_조문_수": sum(1 for row in articles if row.get("is_repealed", False)),
+        "문자손상_조문_수": sum(1 for row in articles if row.get("text_integrity")),
         "status": "ok",
     }
     if indexed != len(articles):

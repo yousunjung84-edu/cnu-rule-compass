@@ -111,6 +111,60 @@ _SUPERSEDED_NAME_RE = re.compile(r"^(?P<base>.+?)\s*\((?P<note>[^)]*(?:제정|�
 _REPEALED_RE = re.compile(r"^\s*<?\s*삭제\s*(?P<date>\d{4}\.\s*\d{1,2}\.\s*\d{1,2}\.?)?")
 
 
+# 문장 끝 물음표(정상)와 손상 물음표를 가른다. 손상은 낱말 안이나 줄머리에 나타난다.
+_SENTENCE_QUESTION_RE = re.compile(r"[다까요나가]\?(?:\s|$)")
+# 낱말 안: '편?재입학', '석?박사' — 가운뎃점 자리
+_MID_WORD_QUESTION_RE = re.compile(r"[0-9A-Za-z가-힣]\?[0-9A-Za-z가-힣]")
+# 줄머리: '? 이 학교는' — 원문자(①) 자리
+_LEADING_QUESTION_RE = re.compile(r"(?m)^\s*\?(?=\s)")
+# 여는 인용부호: '?전남대학교 학칙?' — 「」 자리. 물음표 뒤에 공백 없이 글자가 붙는다
+_QUOTE_QUESTION_RE = re.compile(r"\?(?=[가-힣A-Za-z])")
+
+
+def text_integrity(body: str) -> dict | None:
+    """본문의 문자 손상 흔적을 계량한다 (T8).
+
+    정본 제공처(law.go.kr) 응답 자체에 가운뎃점·원문자·인용부호가 '?'(0x3F)로
+    치환돼 들어오는 사례가 있다(2026-08-10 바이트 확인). 재수집으로 고쳐지지 않고,
+    무엇이었는지 추정 복원하는 것은 날조다. 그래서 **고치지 않고 드러낸다** —
+    소비자가 인용 시 손상 사실을 함께 밝힐 수 있어야 조용히 통과하지 않는다.
+
+    손상이 없으면 None을 반환한다(정상 레코드에 잡음을 붙이지 않는다).
+    """
+    text = str(body)
+    if "?" not in text:
+        return None
+    # 물음표 하나를 한 번만 분류한다(유형이 겹쳐도 중복 계상하지 않는다).
+    kinds: list[str] = []
+    suspect = 0
+    for match in re.finditer(r"\?", text):
+        i = match.start()
+        before = text[i - 1] if i else "\n"
+        after = text[i + 1] if i + 1 < len(text) else ""
+        if _MID_WORD_QUESTION_RE.match(text, max(0, i - 1)):
+            kind = "가운뎃점_추정"
+        elif before in "\n" or (before == " " and text[:i].rstrip(" ").endswith("\n")) or i == 0:
+            if after in (" ", " "):
+                kind = "원문자_추정"
+            else:
+                kind = "인용부호_추정"
+        elif after and re.match(r"[가-힣A-Za-z]", after):
+            kind = "인용부호_추정"
+        else:
+            continue  # 문장 끝 물음표 등 정상
+        suspect += 1
+        if kind not in kinds:
+            kinds.append(kind)
+    if not suspect:
+        return None
+    return {
+        "suspect_marks": suspect,
+        "kinds": kinds,
+        "sentence_questions": len(_SENTENCE_QUESTION_RE.findall(text)),
+        "note": "원문(정본 제공처) 문자 손상으로 확인된 유형입니다. 인용 시 원문대로 옮기고 임의 복원하지 마세요.",
+    }
+
+
 def _repeal_info(body: str) -> tuple[bool, str | None]:
     match = _REPEALED_RE.match(str(body))
     if not match:
@@ -194,6 +248,7 @@ class RuleSearchIndex:
             repealed, repealed_date = _repeal_info(row.get("본문", ""))
             row["is_repealed"] = repealed
             row["repealed_date"] = repealed_date
+            row["text_integrity"] = text_integrity(row.get("본문", ""))
 
     def _load_corpus(self) -> list[dict]:
         try:

@@ -229,6 +229,62 @@ class CorpusMapToolTest(unittest.TestCase):
         self.assertNotIn("hints", search_rule("재입학", k=5))
 
 
+@unittest.skipUnless(DEFAULT_CORPUS_PATH.exists(), "코퍼스 미수집 환경")
+class TextIntegrityTest(unittest.TestCase):
+    """T8 — 원문 문자 손상은 고치지 않고 드러낸다.
+
+    손상은 정본 제공처(law.go.kr) 응답 자체에 있다(2026-08-10 바이트 0x3F 확인).
+    재수집으로 고쳐지지 않고 추정 복원은 날조이므로, 계약은 '조용히 통과하지 않는 것'이다.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.index = RuleSearchIndex()
+
+    def test_damaged_article_is_flagged(self) -> None:
+        row = next(
+            r for r in self.index.articles
+            if r["규정명"] == "전남대학교 학칙" and r["조문번호"] == "제25조"
+        )
+        self.assertIn("편?재입학", row["본문"], "원문 손상을 임의 복원하지 않는다")
+        integrity = row["text_integrity"]
+        self.assertGreaterEqual(integrity["suspect_marks"], 1)
+        self.assertIn("가운뎃점_추정", integrity["kinds"])
+
+    def test_clean_article_has_no_flag(self) -> None:
+        row = next(
+            r for r in self.index.articles
+            if r["규정명"] == "전남대학교 학칙" and r["조문번호"] == "제30조"
+        )
+        self.assertIsNone(row["text_integrity"])
+
+    def test_real_question_mark_is_not_flagged(self) -> None:
+        rows = [r for r in self.index.articles if "숙지하였습니까" in r["본문"]]
+        self.assertTrue(rows, "설문 문항 레코드가 있어야 이 계약을 검증할 수 있다")
+        for row in rows:
+            self.assertIsNone(row["text_integrity"], row["규정명"])
+
+    def test_every_record_carries_the_field(self) -> None:
+        for row in self.index.articles[:50]:
+            self.assertIn("text_integrity", row)
+
+    def test_stats_report_damage_count(self) -> None:
+        stats = get_corpus_stats()
+        self.assertEqual(
+            stats["문자손상_조문_수"],
+            sum(1 for r in self.index.articles if r.get("text_integrity")),
+        )
+
+
+class HtmlUnescapeOrderTest(unittest.TestCase):
+    """이스케이프된 마크업이 태그 제거를 피해 본문에 되살아나면 안 된다(잠재 결함)."""
+
+    def test_escaped_markup_does_not_survive(self) -> None:
+        from collect_regulations import html_to_text
+
+        self.assertNotIn("<td>", html_to_text("&lt;td&gt;예&lt;/td&gt;<p>정상</p>"))
+
+
 class StructureIdempotencyTest(unittest.TestCase):
     """한 번 적용하면 본문에서 제목이 사라지므로, 재실행이 장/절을 지우면 안 된다."""
 
