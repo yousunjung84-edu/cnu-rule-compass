@@ -5,7 +5,7 @@ description: 'cnu-rule-compass MCP(전남대 규정·지침 코퍼스)로 학생
 
 # cnu-rule-answer
 
-> **스킬 v1.2.1 · 기준 서버 버전: cnu-rule-compass v1.3.0** (2026-08-10).
+> **스킬 v1.3.0 · 기준 서버 버전: cnu-rule-compass v1.4.0** (2026-08-10).
 > 이 문서의 도구 계약·동작 기술은 그 버전 관측이다. `get_corpus_stats`로 현재 상태를
 > 확인할 수 있다. v1.0.0에서 관측되던 색인 누락·다중어 질의 축소·꼬리 절 제목 오탐은
 > 서버에서 수정되어 이 문서에서 제거했다.
@@ -44,7 +44,7 @@ description: 'cnu-rule-compass MCP(전남대 규정·지침 코퍼스)로 학생
 
 `규정명` `편제` `조문번호` `조문제목` `본문` `장` `절` `source_key` `source_url`
 `수집일시` `record_type` `revision` `record_id` `score` `matched_terms` `routing`
-`is_current` `superseded_by` `is_repealed` `repealed_date` `repealed_clauses` `text_integrity`
+`is_current` `superseded_by` `is_repealed` `repealed_date` `repealed_clauses` `repealed_items` `text_integrity`
 
 ### `hints` — 결과가 0~1건일 때만 붙는다
 
@@ -179,7 +179,18 @@ get_related_articles(record_id, direction="both")
 - `unresolved` — 해소하지 못한 참조. `kind: "external_law"`는 국가 법령이라 이 코퍼스 밖이다.
   **이 목록을 무시하지 않는다.** 답변에 "이 조문은 고등교육법시행령을 인용한다"고 밝힐 근거다
 
-`kind`는 `cross_rule`(다른 규정) / `same_rule`(같은 규정) / `external_law`(코퍼스 밖).
+`kind` 5종:
+
+| kind | 뜻 | 답변에서 할 일 |
+|---|---|---|
+| `cross_rule` | 코퍼스 안 다른 규정 | 해소된 조문을 함께 제시 |
+| `same_rule` | 같은 규정 안 조문 | 같이 인용 |
+| `external_law` | 국가 법령 등 코퍼스 밖 | **조문 내용을 지어내지 않는다.** 법령명을 밝히고 국가법령정보센터 확인을 안내 |
+| `external_law_unmatched` | 법령·외부 규정으로 보이나 사전 미등재 | 위와 같게 다루되 "확인 필요" 표현을 쓴다 |
+| `attachment_not_collected` | 별표·서식 위임 | §7-A "규정에 없는 부분"과 **구별해** 미수집으로 밝힌다 (`reason_code` 참조) |
+
+`reason_code`: `image_only`(정본이 이미지로 제공) / `parser_scope`(원문에는 있으나 수집 범위 밖).
+어느 쪽이든 내용을 추정해 채우지 않는다.
 
 실측: 농생명산업대학원 교학규정 제11조의2 → 학칙 제30조 해소.
 학칙 제30조의 `inbound`는 4건(농생명·글로컬미래전략·산업·정책 대학원 교학규정).
@@ -337,7 +348,8 @@ A 템플릿을 쓰되 **"규정에 없는 부분"** 절을 반드시 채운다.
 - [ ] 대학원 재입학 문의라면 **학점 통산 문언의 재량/기속 차이**를 확인했는가 (corpus-map §2-2)
 - [ ] `text_integrity`가 붙은 조문을 인용했다면, 원문대로 옮기고 손상 사실을 밝혔는가 (§5-A-2)
 - [ ] `각호1` 같은 옛 표기를 '오타'로 보고 임의로 고쳐 쓰지 않았는가 (§5-A-2)
-- [ ] `repealed_clauses`에 있는 항을 근거로 인용하지 않았는가 (삭제된 항)
+- [ ] `repealed_clauses`·`repealed_items`에 있는 항·호를 근거로 인용하지 않았는가
+- [ ] `external_law`/`external_law_unmatched` 참조의 내용을 지어내지 않았는가
 - [ ] `unresolved`에 `attachment_not_collected`(별표 미수집)가 있으면 '규정에 없음'과 구별해 밝혔는가
 - [ ] 조문에 없는 절차·기한·창구를 임의로 덧붙이지 않았는가
 - [ ] 못 찾은 부분을 "못 찾았다"고 썼는가 (얼버무리지 않았는가)

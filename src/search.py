@@ -165,9 +165,33 @@ def text_integrity(body: str) -> dict | None:
     }
 
 
-# 항 단위 삭제: '③ 삭제', '① 삭제 <2020. 6. 3.>'
-_CLAUSE_REPEAL_RE = re.compile(r"([①-⑳])\s*삭제\s*(?:<\s*([^>]*?)\s*>)?")
+# 항 마커는 한 조문 안에서도 계열이 섞인다 (T15 실측: ①(U+2460) 2,755레코드,
+# ➀(U+2780) 35레코드, 두 계열 혼용 15레코드). 원본 표기는 그대로 두고,
+# 파싱·대조용으로만 번호를 정규화한다.
+_CLAUSE_MARK_FAMILIES = (
+    "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳",
+    "➀➁➂➃➄➅➆➇➈➉",
+    "❶❷❸❹❺❻❼❽❾❿",
+    "➊➋➌➍➎➏➐➑➒➓",
+)
+CLAUSE_NUMBER = {
+    mark: index
+    for family in _CLAUSE_MARK_FAMILIES
+    for index, mark in enumerate(family, start=1)
+}
+_CLAUSE_MARK_CLASS = "".join(sorted(CLAUSE_NUMBER))
+# 항 단위 삭제: '③ 삭제', '➂ 삭제 <2020. 6. 3.>'
+_CLAUSE_REPEAL_RE = re.compile(rf"([{_CLAUSE_MARK_CLASS}])\s*[(<]?\s*삭제\s*[)>]?\s*(?:<\s*([^>]*?)\s*>)?")
+# 호 단위 삭제: '1. (삭제) <개정 2024. 3. 22.>' (T16)
+_ITEM_REPEAL_RE = re.compile(r"(?m)^\s*(\d{1,2})\s*\.\s*[(<]?\s*삭제\s*[)>]?\s*(?:<\s*([^>]*?)\s*>)?")
 _CLAUSE_DATE_RE = re.compile(r"(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})")
+
+
+def _iso_date(note: str) -> str | None:
+    match = _CLAUSE_DATE_RE.search(note or "")
+    if not match:
+        return None
+    return f"{int(match.group(1)):04d}-{int(match.group(2)):02d}-{int(match.group(3)):02d}"
 
 
 def repealed_clauses(body: str) -> list[dict]:
@@ -176,17 +200,34 @@ def repealed_clauses(body: str) -> list[dict]:
     is_repealed는 조문 단위라, '③ 삭제'처럼 항만 지워진 경우를 잡지 못한다.
     소비자가 조문을 통째로 인용하면 '3항이 있는데 내용이 없다'로 보여 혼란을 준다.
     """
+    return [
+        {"clause": match.group(1), "repealed_date": _iso_date(match.group(2) or "")}
+        for match in _CLAUSE_REPEAL_RE.finditer(str(body))
+    ]
+
+
+def repealed_items(body: str) -> list[dict]:
+    """호(號) 단위로 삭제된 목록을 반환한다 (T16).
+
+    호 번호는 삭제 후에도 밀리지 않으므로('1. (삭제)' 뒤에 2·3호가 그대로),
+    소비자가 '제1항 제1호'를 인용하면 삭제된 호를 지목하게 된다. 실제로
+    학칙 제30조 제4항이 제1항 제1호를 인용한다 — 그 참조의 유효성 검증에 필요하다.
+
+    각 호가 어느 항에 속하는지는 **직전에 등장한 항 마커**로 정한다.
+    """
+    text = str(body)
     found: list[dict] = []
-    for match in _CLAUSE_REPEAL_RE.finditer(str(body)):
-        clause = match.group(1)
-        note = match.group(2) or ""
-        date_match = _CLAUSE_DATE_RE.search(note)
+    for match in _ITEM_REPEAL_RE.finditer(text):
+        before = text[: match.start()]
+        clause = None
+        for mark in reversed(before):
+            if mark in CLAUSE_NUMBER:
+                clause = mark
+                break
         found.append({
             "clause": clause,
-            "repealed_date": (
-                f"{int(date_match.group(1)):04d}-{int(date_match.group(2)):02d}-{int(date_match.group(3)):02d}"
-                if date_match else None
-            ),
+            "item": match.group(1),
+            "repealed_date": _iso_date(match.group(2) or ""),
         })
     return found
 
@@ -276,6 +317,7 @@ class RuleSearchIndex:
             row["repealed_date"] = repealed_date
             row["text_integrity"] = text_integrity(row.get("본문", ""))
             row["repealed_clauses"] = repealed_clauses(row.get("본문", ""))
+            row["repealed_items"] = repealed_items(row.get("본문", ""))
 
     def _load_corpus(self) -> list[dict]:
         try:

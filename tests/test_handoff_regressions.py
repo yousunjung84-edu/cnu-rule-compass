@@ -393,6 +393,81 @@ class GoldenCaseTest(unittest.TestCase):
         ))
 
 
+@unittest.skipUnless(DEFAULT_CORPUS_PATH.exists(), "코퍼스 미수집 환경")
+class GyeomjikDomainTest(unittest.TestCase):
+    """T14~T17 — 겸직 지침(지침 계층·반각 낫표·교무과) 도메인 골든 케이스.
+
+    재입학 케이스는 v1.1.0이 그것을 겨냥해 고쳐진 탓에 과적합이다. 계층·편제·낫표
+    표기가 모두 다른 도메인을 별도로 잠가, 한쪽만 통과하는 상태를 막는다.
+    """
+
+    RULE = "전남대학교 전임교원 겸직에 관한 지침"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.index = RuleSearchIndex()
+        cls.article_1 = get_article(cls.RULE, "제1조")
+
+    def test_12_13_external_law_classified_with_name(self) -> None:
+        result = get_related_articles(self.article_1["record_id"], direction="both", resolve=False)
+        external = [e for e in result["unresolved"] if e["kind"] == "external_law"]
+        self.assertEqual(4, len(external), result["unresolved"])
+        raws = " ".join(e["raw"] for e in external)
+        for law in ("국가공무원법", "교육공무원법", "교육공무원임용령", "국가공무원 복무규정"):
+            self.assertIn(law, raws)
+        self.assertFalse([e for e in result["unresolved"] if e["kind"] == "same_rule"])
+
+    def test_14_mixed_clause_markers_recognised(self) -> None:
+        from src.search import CLAUSE_NUMBER
+
+        body = get_article(self.RULE, "제5조의2")["article"]["본문"]
+        numbers = [CLAUSE_NUMBER[ch] for ch in body if ch in CLAUSE_NUMBER]
+        self.assertEqual([1, 2, 3, 4], numbers, "마커 계열이 섞여도 항 4개로 인식되어야 한다")
+
+    def test_15_16_item_level_repeal(self) -> None:
+        five = get_article(self.RULE, "제5조")["article"]["repealed_items"]
+        self.assertEqual(
+            [{"clause": "①", "item": "1", "repealed_date": "2024-03-22"}], five
+        )
+        six = get_article(self.RULE, "제6조")["article"]["repealed_items"]
+        self.assertEqual(
+            [{"clause": "②", "item": "5", "repealed_date": "2024-03-22"}], six
+        )
+
+    def test_17_attachment_reason_is_tier_specific(self) -> None:
+        guide = get_related_articles(
+            get_article(self.RULE, "제9조")["record_id"], direction="outbound", resolve=False
+        )
+        attachment = [e for e in guide["unresolved"] if e["kind"] == "attachment_not_collected"]
+        self.assertTrue(attachment)
+        self.assertEqual("parser_scope", attachment[0]["reason_code"])
+        regulation = get_related_articles(
+            get_article("전남대학교 학칙", "제44조")["record_id"],
+            direction="outbound", resolve=False,
+        )
+        self.assertEqual(
+            "image_only",
+            [e for e in regulation["unresolved"] if e["kind"] == "attachment_not_collected"][0]["reason_code"],
+        )
+
+    def test_18_multiple_laws_in_one_article(self) -> None:
+        result = get_related_articles(
+            get_article(self.RULE, "제5조")["record_id"], direction="outbound", resolve=False
+        )
+        self.assertFalse(
+            [e for e in result["unresolved"] if e["kind"] == "same_rule"],
+            "법령 인용이 자기 규정 참조로 떨어지면 없는 조문을 지목하게 된다",
+        )
+
+    def test_11_gyeomjik_search_has_no_false_positive(self) -> None:
+        hits = self.index.search("전임교원 겸직 허가 기준", k=8)
+        self.assertTrue(hits)
+        self.assertTrue(
+            all(self.RULE == r["규정명"] for r in hits),
+            [(r["규정명"], r["조문번호"]) for r in hits],
+        )
+
+
 class StructureIdempotencyTest(unittest.TestCase):
     """한 번 적용하면 본문에서 제목이 사라지므로, 재실행이 장/절을 지우면 안 된다."""
 
