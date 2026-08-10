@@ -12,6 +12,7 @@ import unittest
 
 from src.search import DEFAULT_CORPUS_PATH, RuleSearchIndex
 from src.mcp_server import (
+    get_article,
     get_corpus_stats,
     get_related_articles,
     list_rules,
@@ -283,6 +284,113 @@ class HtmlUnescapeOrderTest(unittest.TestCase):
         from collect_regulations import html_to_text
 
         self.assertNotIn("<td>", html_to_text("&lt;td&gt;예&lt;/td&gt;<p>정상</p>"))
+
+
+@unittest.skipUnless(DEFAULT_CORPUS_PATH.exists(), "코퍼스 미수집 환경")
+class GoldenCaseTest(unittest.TestCase):
+    """T13 — v1.1.0~v1.2.0 수용 기준을 코드로 고정한다.
+
+    골든 케이스가 테스트로 박혀 있지 않으면 다음 릴리스에서 조용히 회귀한다.
+    특히 커버리지 게이트(T2)는 스코어링을 건드릴 때마다 되돌아가기 쉽다.
+    """
+
+    HAKCHIK_30 = "rule-2200000155895-6ef5c792ea6d7b66"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.index = RuleSearchIndex()
+
+    def _hits(self, query: str, k: int = 10, **kwargs) -> list[tuple[str, str]]:
+        return [(r["규정명"], r["조문번호"]) for r in self.index.search(query, k=k, **kwargs)]
+
+    def test_01_index_matches_records(self) -> None:
+        stats = get_corpus_stats()
+        self.assertEqual(stats["조문_수"], stats["색인_문서_수"])
+
+    def test_02_03_04_readmission_queries(self) -> None:
+        for query in ("재입학", "재입학 어떻게 하나요", "재입학 허가 신청"):
+            with self.subTest(query=query):
+                self.assertIn(("전남대학교 학칙", "제30조"), self._hits(query))
+        self.assertNotIn(("전남대학교 교학규정", "제10조"), self._hits("재입학 허가 신청", k=8))
+
+    def test_05_repealed_excluded(self) -> None:
+        self.assertNotIn(("전남대학교 교육대학원 교학규정", "제11조"), self._hits("재입학"))
+
+    def test_06_superseded_excluded(self) -> None:
+        self.assertFalse([n for n, _ in self._hits("수강신청 정정", k=8) if "(2012" in n])
+
+    def test_07_grade_correction(self) -> None:
+        hits = self._hits("성적 정정 기간")
+        self.assertIn(("전남대학교 교학규정", "제46조"), hits)
+        self.assertNotIn(("전남대학교 총장임용후보자 선정에 관한 규정 시행 세칙", "제28조"), hits)
+
+    def test_08_inbound_references(self) -> None:
+        result = get_related_articles(self.HAKCHIK_30, direction="inbound", resolve=False)
+        self.assertGreaterEqual(len(result["inbound"]), 4)
+
+    def test_09_section_title_split(self) -> None:
+        article = get_article("전남대학교 교학규정", "제11조")["article"]
+        self.assertNotIn("제5절", article["본문"])
+        self.assertIsNotNone(article["절"])
+
+    def test_10_ai_query_hint(self) -> None:
+        # 핸드오프 골든 #10은 `생성형 인공지능` → count 0을 기대했으나, 규정 계층 확장으로
+        # `인공지능` 어휘가 코퍼스에 실재하게 됐다(인공지능융합연구소 규정 등).
+        # 어휘 부재 판정은 실제로 없는 어휘로 검증한다.
+        result = search_rule("생성형 인공지능 챗봇 언어모델", k=5)
+        self.assertEqual(0, result["count"])
+        self.assertTrue(result["hints"]["query_terms_unmatched"])
+
+    def test_10b_ai_vocabulary_exists_but_is_not_usage_rule(self) -> None:
+        """⚠️ `인공지능`이 매칭된다고 'AI 활용 근거'가 아니다 — 가짜 근거 방지 계약.
+
+        매칭되는 조문은 **연구소 설치·사무분장** 규정이다. AI 활용을 규율하지 않는다.
+        소비자가 hints 부재만 보고 '근거 있음'으로 넘어가면 안 되므로 사실을 고정한다.
+        """
+        result = search_rule("인공지능", k=5)
+        self.assertGreater(result["count"], 0)
+        self.assertIsNone(result.get("hints"))
+        names = {r["규정명"] for r in result["results"]}
+        self.assertTrue(
+            any("연구소" in n or "사무분장" in n for n in names),
+            f"AI 어휘 매칭의 성격이 바뀌었다 — 스킬 §6-2 재검토 필요: {names}",
+        )
+
+    def test_11_12_no_repair_but_flagged(self) -> None:
+        article = get_article("전남대학교 학칙", "제25조")["article"]
+        self.assertIsNotNone(article["text_integrity"])  # 손상은 드러난다
+        flagged = sum(1 for r in self.index.articles if r.get("text_integrity"))
+        self.assertEqual(get_corpus_stats()["문자손상_조문_수"], flagged)
+
+    def test_13_reference_classification(self) -> None:
+        result = get_related_articles(self.HAKCHIK_30, direction="both", resolve=False)
+        self.assertTrue(any(
+            e["kind"] == "external_law" and "고등교육법시행령" in e["raw"]
+            for e in result["unresolved"]
+        ))
+        self.assertFalse([e for e in result["unresolved"] if "제44조" in e["raw"]])
+        self.assertFalse([
+            e for e in result["unresolved"] if e["raw"].startswith(("경우", "다만", "에는"))
+        ])
+        self.assertFalse([e for e in result["unresolved"] if e["kind"] == "unknown"])
+
+    def test_14_clause_level_repeal(self) -> None:
+        article = get_article("전남대학교 학칙", "제44조")["article"]
+        self.assertEqual(["③"], [c["clause"] for c in article["repealed_clauses"]])
+
+    def test_15_stats_exclusion_breakdown(self) -> None:
+        stats = get_corpus_stats()
+        self.assertIn("적재제외_사유별", stats)
+        self.assertEqual(stats["적재제외_레코드_수"], sum(stats["적재제외_사유별"].values()))
+        self.assertNotIn("warning_excluded", stats, "의도치 않은 제외가 있으면 재색인이 필요하다")
+
+    def test_attachment_reference_is_marked(self) -> None:
+        record_id = get_article("전남대학교 학칙", "제44조")["record_id"]
+        result = get_related_articles(record_id, direction="outbound", resolve=False)
+        self.assertTrue(any(
+            e["kind"] == "attachment_not_collected" and "별표" in e["raw"]
+            for e in result["unresolved"]
+        ))
 
 
 class StructureIdempotencyTest(unittest.TestCase):

@@ -5,7 +5,7 @@ description: 'cnu-rule-compass MCP(전남대 규정·지침 코퍼스)로 학생
 
 # cnu-rule-answer
 
-> **스킬 v1.1.2 · 기준 서버 버전: cnu-rule-compass v1.2.0** (2026-08-10).
+> **스킬 v1.2.0 · 기준 서버 버전: cnu-rule-compass v1.3.0** (2026-08-10).
 > 이 문서의 도구 계약·동작 기술은 그 버전 관측이다. `get_corpus_stats`로 현재 상태를
 > 확인할 수 있다. v1.0.0에서 관측되던 색인 누락·다중어 질의 축소·꼬리 절 제목 오탐은
 > 서버에서 수정되어 이 문서에서 제거했다.
@@ -44,7 +44,7 @@ description: 'cnu-rule-compass MCP(전남대 규정·지침 코퍼스)로 학생
 
 `규정명` `편제` `조문번호` `조문제목` `본문` `장` `절` `source_key` `source_url`
 `수집일시` `record_type` `revision` `record_id` `score` `matched_terms` `routing`
-`is_current` `superseded_by` `is_repealed` `repealed_date` `text_integrity`
+`is_current` `superseded_by` `is_repealed` `repealed_date` `repealed_clauses` `text_integrity`
 
 ### `hints` — 결과가 0~1건일 때만 붙는다
 
@@ -223,8 +223,18 @@ search_rule("생성형 인공지능 챗봇")
 → count: 0, hints.query_terms_unmatched: ["생성형", "챗봇"], suggest: "no_such_concept"
 ```
 
-`query_terms_unmatched`에 `인공지능`·`생성형` 같은 핵심 어휘가 들어 있으면
-**코퍼스에 그 개념 자체가 없다**는 서버의 판정이다. 이 경우:
+⚠️ **`인공지능`은 이제 코퍼스에 있는 어휘다.** 규정 계층 확장으로
+`전남대학교 인공지능융합연구소 규정`·`사무분장 규정` 등이 들어왔기 때문이다.
+따라서 `search_rule("인공지능")`은 결과를 반환하고 `hints`도 붙지 않는다.
+
+**그러나 그것은 AI 활용을 규율하는 조문이 아니다.** 연구소 설치·조직·사무분장 규정이다.
+이걸 "AI 활용 근거"로 붙이면 정확히 가짜 근거다. 어휘 매칭과 규율 대상은 다르다.
+
+판정 순서:
+
+1. `query_terms_unmatched`에 `생성형`·`챗봇`처럼 어휘가 아예 없으면 → 개념 부재
+2. 어휘는 매칭됐어도 **조문제목·본문이 연구소 설치·조직·사무분장이면 → AI 활용 근거 아님**
+3. 둘 중 어느 쪽이든:
 
 1. **근거 조문 확인되지 않음**으로 처리한다.
 2. 인접 조문(표절 정의, 원격수업 콘텐츠, 정보보안 등)은 **"직접 근거는 아니지만 관련될 수
@@ -314,6 +324,8 @@ A 템플릿을 쓰되 **"규정에 없는 부분"** 절을 반드시 채운다.
 - [ ] AI 관련 문의라면 §6-2를 적용했는가 (`query_terms_unmatched` 근거)
 - [ ] 대학원 재입학 문의라면 **학점 통산 문언의 재량/기속 차이**를 확인했는가 (corpus-map §2-2)
 - [ ] `text_integrity`가 붙은 조문을 인용했다면, 원문대로 옮기고 손상 사실을 밝혔는가 (§5-A-2)
+- [ ] `repealed_clauses`에 있는 항을 근거로 인용하지 않았는가 (삭제된 항)
+- [ ] `unresolved`에 `attachment_not_collected`(별표 미수집)가 있으면 '규정에 없음'과 구별해 밝혔는가
 - [ ] 조문에 없는 절차·기한·창구를 임의로 덧붙이지 않았는가
 - [ ] 못 찾은 부분을 "못 찾았다"고 썼는가 (얼버무리지 않았는가)
 

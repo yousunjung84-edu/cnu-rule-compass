@@ -165,6 +165,32 @@ def text_integrity(body: str) -> dict | None:
     }
 
 
+# 항 단위 삭제: '③ 삭제', '① 삭제 <2020. 6. 3.>'
+_CLAUSE_REPEAL_RE = re.compile(r"([①-⑳])\s*삭제\s*(?:<\s*([^>]*?)\s*>)?")
+_CLAUSE_DATE_RE = re.compile(r"(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})")
+
+
+def repealed_clauses(body: str) -> list[dict]:
+    """항(項) 단위로 삭제된 목록을 반환한다 (T10).
+
+    is_repealed는 조문 단위라, '③ 삭제'처럼 항만 지워진 경우를 잡지 못한다.
+    소비자가 조문을 통째로 인용하면 '3항이 있는데 내용이 없다'로 보여 혼란을 준다.
+    """
+    found: list[dict] = []
+    for match in _CLAUSE_REPEAL_RE.finditer(str(body)):
+        clause = match.group(1)
+        note = match.group(2) or ""
+        date_match = _CLAUSE_DATE_RE.search(note)
+        found.append({
+            "clause": clause,
+            "repealed_date": (
+                f"{int(date_match.group(1)):04d}-{int(date_match.group(2)):02d}-{int(date_match.group(3)):02d}"
+                if date_match else None
+            ),
+        })
+    return found
+
+
 def _repeal_info(body: str) -> tuple[bool, str | None]:
     match = _REPEALED_RE.match(str(body))
     if not match:
@@ -249,6 +275,7 @@ class RuleSearchIndex:
             row["is_repealed"] = repealed
             row["repealed_date"] = repealed_date
             row["text_integrity"] = text_integrity(row.get("본문", ""))
+            row["repealed_clauses"] = repealed_clauses(row.get("본문", ""))
 
     def _load_corpus(self) -> list[dict]:
         try:

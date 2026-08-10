@@ -16,7 +16,7 @@ try:
     SERVER_VERSION = metadata.version("cnu-rule-compass")
 except metadata.PackageNotFoundError:
     # 미설치(PYTHONPATH 직접 실행) 환경 폴백 — pyproject.toml [project].version과 동기.
-    SERVER_VERSION = "1.2.0"
+    SERVER_VERSION = "1.3.0"
 
 TOOL_NAMES = (
     "search_rule",
@@ -191,11 +191,26 @@ def get_corpus_stats() -> dict:
         divisions[str(row.get("편제", ""))] = divisions.get(str(row.get("편제", "")), 0) + 1
     collected = sorted(str(row.get("수집일시", "")) for row in articles if row.get("수집일시"))
     indexed = len(index._term_frequencies)
+    # 적재 게이트에서 제외된 레코드의 사유별 내역 (T12).
+    # '색인에서 빠진 24건'이 T1 재발 통로인지 구별할 수 있어야 한다.
+    excluded: dict[str, int] = {}
+    for row in index.rejected_articles:
+        excluded[row["reason"]] = excluded.get(row["reason"], 0) + 1
+    # 의도된 제외: 빈 본문·중복 레코드·본문 초과·비공식 URL. 그 밖은 사고로 본다.
+    intended = {"empty_body", "duplicate_record", "oversized_body", "invalid_source_url"}
+    unintended = {k: v for k, v in excluded.items() if k not in intended}
     stats = {
         "규정_수": len({row["규정명"] for row in articles}),
         "조문_수": len(articles),
         "색인_문서_수": indexed,
+        # 구 필드명 — 한 릴리스 동안 병기한다(v1.2.0 도입, v1.4.0에서 제거 예정)
         "제외_레코드_수": len(index.rejected_articles),
+        "적재제외_레코드_수": len(index.rejected_articles),
+        "적재제외_사유별": dict(sorted(excluded.items(), key=lambda kv: -kv[1])),
+        "적재제외_설명": (
+            "적재 게이트가 걸러낸 레코드 수입니다. 색인 누락이 아니라 의도된 제외이며, "
+            "조문_수·색인_문서_수에는 처음부터 포함되지 않습니다."
+        ),
         "편제별_분포": dict(sorted(divisions.items(), key=lambda kv: -kv[1])),
         "최초_수집일시": collected[0] if collected else None,
         "최신_수집일시": collected[-1] if collected else None,
@@ -206,6 +221,8 @@ def get_corpus_stats() -> dict:
     }
     if indexed != len(articles):
         stats["warning"] = f"색인({indexed})과 레코드({len(articles)}) 수가 다릅니다 — 색인 재빌드 필요"
+    if unintended:
+        stats["warning_excluded"] = f"의도치 않은 제외 사유: {unintended} — T1 절차로 재색인 필요"
     return stats
 
 

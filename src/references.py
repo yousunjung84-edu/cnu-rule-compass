@@ -22,13 +22,38 @@ import re
 _REFERENCE_RE = re.compile(
     r"(?:「\s*(?P<quoted>[^」]{2,40}?)\s*」\s*)?"
     r"(?P<plain>[가-힣A-Za-z·]{2,30})?\s*"
+    # '고등교육법시행령 부칙 제19조'처럼 법령명과 조문 사이에 '부칙'이 끼어든다.
+    # 이걸 흡수하지 않으면 규정명 자리에 '부칙'이 잡혀 법령명을 잃는다.
+    r"(?P<addendum>부칙)?\s*"
     r"제\s*(?P<article>\d+)\s*조(?:\s*의\s*(?P<sub>\d+))?"
     r"(?:\s*제\s*(?P<clause>\d+)\s*항)?"
     r"(?P<each>\s*각\s*호)?"
 )
 _EXTERNAL_SUFFIX = ("법", "법률", "시행령", "시행규칙", "령", "규칙")
-# 규정명 자리에 올 수 있으나 규정을 특정하지 않는 말
-_VAGUE_PREFIX = {"이", "본", "동", "같은", "그", "위", "해당", "규정", "지침", "이상", "각"}
+# 알려진 외부 법령 — 접미사만으로 못 잡는 표기를 확실히 분류한다.
+_EXTERNAL_LAWS = (
+    "고등교육법시행령", "고등교육법", "교육공무원법", "사립학교법", "개인정보보호법",
+    "개인정보 보호법", "국가공무원법", "지방공무원법", "산업교육진흥 및 산학연협력촉진에 관한 법률",
+    "학교보건법", "평생교육법", "초·중등교육법시행령", "초·중등교육법", "병역법",
+    "국가연구개발혁신법", "공공기관의 운영에 관한 법률", "상법", "근로기준법",
+)
+# 규정명 자리에 올 수 있으나 규정을 특정하지 않는 말. 조사·접속어가 규정명으로
+# 오인되면 같은 참조가 해소본과 미해소본으로 중복 계상된다('경우에는 제44조' 사고).
+_VAGUE_PREFIX = {
+    "이", "본", "동", "같은", "그", "위", "해당", "규정", "지침", "이상", "각",
+    "경우", "경우에는", "다만", "때에는", "따라", "의하여", "의한", "따른", "관한",
+    "및", "또는", "제외하고는", "포함한", "준용한다", "정한", "정하는", "위하여",
+}
+# 규정명 후보 끝에 붙는 조사·어미 — 벗겨서 다시 판정한다.
+_TRAILING_PARTICLE_RE = re.compile(
+    r"(에는|에서|에게|으로|이나|이라도|에|은|는|이|가|을|를|의|와|과|도|만|로)$"
+)
+
+
+# 별표·별지서식 위임 표기
+_ATTACHMENT_RE = re.compile(r"별표\s*\d+(?:의\s*\d+)?|별지\s*서식\s*제\s*\d+\s*호|별지\s*제\s*\d+\s*호\s*서식")
+# '제3항' → '③' 대조용
+_CLAUSE_MARKS = {f"제{i}항": mark for i, mark in enumerate("①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮", start=1)}
 
 
 def _norm_article(article: str, sub: str | None) -> str:
@@ -55,17 +80,33 @@ class ReferenceIndex:
         self._inbound: dict[str, list[dict]] | None = None
 
     def _resolve_rule(self, raw: str | None, current_rule: str) -> tuple[str | None, str]:
-        """참조에 적힌 규정명을 코퍼스 규정명으로 해소하고 종류를 판정한다."""
-        if not raw or raw in _VAGUE_PREFIX:
+        """참조에 적힌 규정명을 코퍼스 규정명으로 해소하고 종류를 판정한다.
+
+        한국 법령 관례상 규정명 없는 '제○조'는 자기 규정 내 참조다. 따라서 규정명을
+        특정하지 못하면 ``unknown``으로 버리지 않고 ``same_rule``로 해석한다.
+        ``unknown``은 규정명처럼 보이는 말이 실제로 어느 규정도 가리키지 않을 때만 쓴다.
+        """
+        name = (raw or "").strip()
+        if not name or name in _VAGUE_PREFIX:
             return current_rule, "same_rule"
-        name = raw.strip()
         if name in self._alias:
             resolved = self._alias[name]
-            kind = "same_rule" if resolved == current_rule else "cross_rule"
-            return resolved, kind
+            return resolved, "same_rule" if resolved == current_rule else "cross_rule"
+        if any(name.endswith(law) or law in name for law in _EXTERNAL_LAWS):
+            return None, "external_law"
+        # 조사가 붙어 있으면 벗기고 한 번 더 본다('교학규정에' → '교학규정')
+        stripped = _TRAILING_PARTICLE_RE.sub("", name)
+        if stripped != name and stripped:
+            if stripped in _VAGUE_PREFIX:
+                return current_rule, "same_rule"
+            if stripped in self._alias:
+                resolved = self._alias[stripped]
+                return resolved, "same_rule" if resolved == current_rule else "cross_rule"
+            name = stripped
         if name.endswith(_EXTERNAL_SUFFIX):
             return None, "external_law"
-        return None, "unknown"
+        # 규정명 자리가 조사·접속어였을 뿐이면 자기 규정 참조로 본다.
+        return current_rule, "same_rule"
 
     def outbound(self, record: dict, resolve: bool = True) -> tuple[list[dict], list[dict]]:
         """이 조문이 인용하는 참조 목록과, 해소하지 못한 참조 목록을 반환한다."""
@@ -75,14 +116,38 @@ class ReferenceIndex:
         unresolved: list[dict] = []
         seen: set[tuple] = set()
 
+        # 별표·별지서식 위임 (T11). 정본(law.go.kr)이 별표를 이미지로 제공해
+        # 텍스트 수집이 불가하다(2026-08-10 확인: <img src="/LSW/flDownload.do?flSeq=...">).
+        # 수집하지 못했다는 사실 자체를 남겨, 소비자가 '규정에 없음'과 구별하게 한다.
+        for match in _ATTACHMENT_RE.finditer(body):
+            raw_text = " ".join(match.group(0).split())
+            key = ("attachment", raw_text)
+            if key in seen:
+                continue
+            seen.add(key)
+            unresolved.append({
+                "raw": raw_text,
+                "kind": "attachment_not_collected",
+                "reason": "별표·서식은 정본이 이미지로 제공해 미수집입니다. 원문 링크에서 확인하세요.",
+            })
+
         for match in _REFERENCE_RE.finditer(body):
             raw_name = match.group("quoted") or match.group("plain")
+            addendum = bool(match.group("addendum"))
             target_article = _norm_article(match.group("article"), match.group("sub"))
             clause = f"제{int(match.group('clause'))}항" if match.group("clause") else None
             if match.group("each"):
                 clause = f"{clause} 각 호" if clause else "각 호"
             rule, kind = self._resolve_rule(raw_name, current_rule)
             raw_text = " ".join(match.group(0).split())
+            # 규정명으로 인정되지 않은 앞말(조사·접속어)은 표시 문자열에서도 덜어낸다.
+            if raw_name and kind == "same_rule" and raw_name not in (rule or ""):
+                cut = raw_text.find("제")
+                if cut > 0:
+                    raw_text = raw_text[cut:]
+            if addendum and kind == "same_rule" and not raw_name:
+                # 규정명 없는 '부칙 제N조'는 자기 규정의 부칙이다.
+                target_article = f"부칙 {target_article}"
 
             if kind in {"external_law", "unknown"}:
                 key = ("unresolved", raw_text)
@@ -105,6 +170,19 @@ class ReferenceIndex:
             seen.add(key)
 
             target = self._by_key.get((rule, target_article))
+            if target is not None and clause:
+                # 삭제된 항을 가리키는 참조는 무효다. 조용히 해소하면 소비자가
+                # 없는 항을 근거로 인용하게 된다(T10).
+                gone = {row["clause"] for row in target.get("repealed_clauses") or []}
+                head = clause.split()[0]
+                circled = _CLAUSE_MARKS.get(head)
+                if circled and circled in gone:
+                    unresolved.append({
+                        "raw": raw_text,
+                        "kind": "repealed_clause",
+                        "reason": f"{rule} {target_article} {head}은(는) 삭제된 항입니다.",
+                    })
+                    continue
             entry = {
                 "raw": raw_text,
                 "target_rule": rule,
