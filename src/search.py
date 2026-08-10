@@ -22,6 +22,10 @@ _FULL_CORPUS = _ROOT / "data" / "rules_corpus.json"
 _SAMPLE_CORPUS = _ROOT / "data" / "rules_corpus.sample.json"
 DEFAULT_CORPUS_PATH = _FULL_CORPUS if _FULL_CORPUS.exists() else _SAMPLE_CORPUS
 MAX_ARTICLE_LENGTH = 30_000
+# 별표는 표 전문이라 조문보다 훨씬 길다(징계양정기준 33,078자·마이크로디그리 31,760자).
+# T27이 검색 응답에서 별표 본문을 절단·제외하므로, 길다고 적재에서 떨어뜨릴 이유가
+# 없어졌다 — 떨어뜨리면 '판단 기준이 별표에만 있는' 질의가 통째로 답을 잃는다.
+MAX_ATTACHMENT_LENGTH = 60_000
 # 라우팅 동점 확장 상한 — 이보다 넓어지면 좁히는 의미가 없어 전체 검색으로 폴백한다.
 ROUTE_TIE_LIMIT = 30
 ALLOWED_SOURCE_HOST = "jnu.ac.kr"
@@ -280,6 +284,34 @@ def prepare_article(article: dict) -> dict:
     return prepared
 
 
+# 검색 응답에 실을 별표 본문의 최대 길이. 전문은 get_article로만 준다 (T27).
+ATTACHMENT_SNIPPET_LENGTH = 200
+
+
+def _summarize_attachment(row: dict) -> dict:
+    """검색 결과에 실린 별표의 본문을 절단하고 표 구조 메타를 붙인다 (T27).
+
+    별표는 대부분 표다. 표를 마크다운/텍스트로 통째 실어 보내면 컨텍스트만 먹고
+    구조는 오히려 왜곡된다. 규모를 숫자로 알려주고 전문 조회는 get_article로 넘긴다.
+    """
+    if row.get("record_type") != "별표":
+        return row
+    body = str(row.get("본문", ""))
+    summarized = dict(row)
+    summarized["본문_길이"] = len(body)
+    summarized["표_수"] = body.count("<table")
+    summarized["행_수"] = body.count("<tr")
+    if len(body) > ATTACHMENT_SNIPPET_LENGTH:
+        summarized["본문"] = body[:ATTACHMENT_SNIPPET_LENGTH]
+        summarized["본문_절단"] = True
+        summarized["본문_절단_안내"] = (
+            "별표 본문은 검색 응답에서 앞부분만 보여줍니다. 전문은 get_article로 조회하세요."
+        )
+    else:
+        summarized["본문_절단"] = False
+    return summarized
+
+
 class RuleSearchIndex:
     """866개 조문 규모에 맞춘 메모리 BM25 근사 인덱스."""
 
@@ -349,9 +381,14 @@ class RuleSearchIndex:
                 raise ValueError(f"{number}번째 조문의 필수 필드가 누락되었습니다.")
             reason = None
             body = str(article.get("본문", "")).strip()
+            limit = (
+                MAX_ATTACHMENT_LENGTH
+                if str(article.get("record_type")) == "별표"
+                else MAX_ARTICLE_LENGTH
+            )
             if not body:
                 reason = "empty_body"
-            elif len(body) > MAX_ARTICLE_LENGTH:
+            elif len(body) > limit:
                 reason = "oversized_body"
             elif not validate_source_url(article.get("source_url"), article.get("source_key")):
                 reason = "invalid_source_url"
@@ -449,15 +486,21 @@ class RuleSearchIndex:
         tied = [name for score, name in scored if score >= cutoff]
         return [] if len(tied) > ROUTE_TIE_LIMIT else tied
 
-    def _version_filter(self, include_superseded: bool, include_repealed: bool) -> set[int] | None:
+    def _version_filter(
+        self,
+        include_superseded: bool,
+        include_repealed: bool,
+        include_attachments: bool = True,
+    ) -> set[int] | None:
         """기본은 현행·유효 조문만 본다. 구판본·삭제 조문을 근거로 인용하면 사고다."""
-        if include_superseded and include_repealed:
+        if include_superseded and include_repealed and include_attachments:
             return None
         allowed = {
             doc_id
             for doc_id, row in enumerate(self.articles)
             if (include_superseded or row.get("is_current", True))
             and (include_repealed or not row.get("is_repealed", False))
+            and (include_attachments or row.get("record_type") != "별표")
         }
         return allowed
 
@@ -467,8 +510,26 @@ class RuleSearchIndex:
         k: int = 5,
         include_superseded: bool = False,
         include_repealed: bool = False,
+        include_attachments: bool = False,
     ) -> list[dict]:
-        """관련 조문 상위 k개를 인용 필드와 점수와 함께 반환한다 (2단 검색).
+        """관련 조문 상위 k개를 반환한다 (2단 검색). 상세 메타는 search_detailed 참고."""
+        return self.search_detailed(
+            query,
+            k=k,
+            include_superseded=include_superseded,
+            include_repealed=include_repealed,
+            include_attachments=include_attachments,
+        )["results"]
+
+    def search_detailed(
+        self,
+        query: str,
+        k: int = 5,
+        include_superseded: bool = False,
+        include_repealed: bool = False,
+        include_attachments: bool = False,
+    ) -> dict:
+        """검색 결과와 '무엇을 뺐는지'를 함께 반환한다 (2단 검색 + T27 별표 게이트).
 
         1단에서 후보 규정을 좁히고(route_rules) 2단에서 그 규정들의 조문만 검색한다.
         1단이 아무 규정도 못 좁히거나 2단 결과가 비면 전체 조문 검색으로 폴백한다.
@@ -476,26 +537,59 @@ class RuleSearchIndex:
         낮은 관련성 결과를 근거로 오인하지 않고 '해당 규정 미확인'으로 처리할 수 있다.
 
         기본값은 현행·유효 조문만이다. 감사 대응처럼 구판본이 필요하면 켠다.
+
+        **별표는 기본 제외한다 (T27).** 별표 본문은 조문의 수십 배 길이라(중앙값
+        1,710자 대 132자, 최대 21,128자) 낮은 점수로도 응답을 잠식해 정작 필요한
+        조문을 밀어낸다. 다만 **조용히 빼지 않는다** — 무엇이 빠졌는지 목록으로
+        돌려주어 소비자가 get_article로 전문을 가져갈 수 있게 한다.
         """
+        empty = {"results": [], "attachments_omitted": 0, "attachments": []}
         if not isinstance(query, str) or not query.strip() or k <= 0:
-            return []
+            return empty
+        # 별표를 뺄 때도 '무엇이 빠졌는지'를 알려면 일단 함께 순위를 매겨야 한다.
+        # 깊이는 k의 두 배 + 여유 — 별표가 상위를 채워도 조문 k건을 확보한다.
+        depth = k * 2 + 10
         allowed = self._version_filter(include_superseded, include_repealed)
         routed = self.route_rules(query)
+        ranked: list[dict] = []
         if routed:
             routed_ids: set[int] = set()
             for name in routed:
                 routed_ids.update(self._rule_docs.get(name, ()))
             if allowed is not None:
                 routed_ids &= allowed
-            results = self._search_articles(query, k, restrict_ids=routed_ids) if routed_ids else []
-            if results:
-                for row in results:
-                    row["routing"] = "rule-first"
-                return results
-        results = self._search_articles(query, k, restrict_ids=allowed)
-        for row in results:
-            row["routing"] = "full-scan"
-        return results
+            ranked = self._search_articles(query, depth, restrict_ids=routed_ids) if routed_ids else []
+            for row in ranked:
+                row["routing"] = "rule-first"
+        if not ranked:
+            ranked = self._search_articles(query, depth, restrict_ids=allowed)
+            for row in ranked:
+                row["routing"] = "full-scan"
+        if not ranked:
+            return empty
+
+        if include_attachments:
+            results = [_summarize_attachment(row) for row in ranked[:k]]
+            return {"results": results, "attachments_omitted": 0, "attachments": []}
+        # 별표를 뺐다면, 원래 상위 k건에 들어갈 예정이었던 것만 '제외'로 보고한다
+        # (뒤쪽에 걸린 무관한 별표까지 세면 경고가 잡음이 된다).
+        omitted = [row for row in ranked[:k] if row.get("record_type") == "별표"]
+        results = [row for row in ranked if row.get("record_type") != "별표"][:k]
+        return {
+            "results": results,
+            "attachments_omitted": len(omitted),
+            "attachments": [
+                {
+                    "규정명": row.get("규정명"),
+                    "조문번호": row.get("조문번호"),
+                    "조문제목": row.get("조문제목"),
+                    "record_id": row.get("record_id"),
+                    "본문_길이": len(str(row.get("본문", ""))),
+                    "score": row.get("score"),
+                }
+                for row in omitted
+            ],
+        }
 
     def _search_articles(
         self, query: str, k: int, restrict_ids: set[int] | None

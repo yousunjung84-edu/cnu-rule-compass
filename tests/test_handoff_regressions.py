@@ -84,10 +84,14 @@ class StructureTitleTest(unittest.TestCase):
         cls.index = RuleSearchIndex()
 
     def test_no_section_title_left_in_body(self) -> None:
+        # 별표는 제외한다. 별표 본문의 '제1장 총칙'은 규정의 편제가 아니라 **첨부된
+        # 문서 자체의 구조**다(포털 이용약관 전문 등). 이걸 장/절 필드로 끌어올리면
+        # 첨부 문서를 훼손한다.
         residue = [
             (row["규정명"], row["조문번호"])
             for row in self.index.articles
-            if any(SECTION_RE.match(line) for line in row["본문"].split("\n") if line.strip())
+            if row.get("record_type") != "별표"
+            and any(SECTION_RE.match(line) for line in row["본문"].split("\n") if line.strip())
         ]
         self.assertEqual([], residue, f"본문에 장/절 제목 잔존: {residue[:5]}")
 
@@ -531,10 +535,136 @@ class V15GoldenCaseTest(unittest.TestCase):
 
     def test_22_attachment_collected_for_guideline_tier(self) -> None:
         attachments = [a for a in self.index.articles if a.get("record_type") == "별표"]
-        self.assertGreaterEqual(len(attachments), 30)
+        self.assertGreaterEqual(len(attachments), 80)
         self.assertTrue(all(a.get("수집방법") == "auto" for a in attachments))
-        hits = self.index.search("겸직 허가절차 제출서류", k=5)
+        # v1.6부터 별표는 검색 기본 제외다(T27) — 켜야 나온다.
+        hits = self.index.search("겸직 허가절차 제출서류", k=5, include_attachments=True)
         self.assertTrue(any(r.get("record_type") == "별표" for r in hits), hits)
+        self.assertFalse(
+            any(r.get("record_type") == "별표"
+                for r in self.index.search("겸직 허가절차 제출서류", k=5))
+        )
+
+
+@unittest.skipUnless(DEFAULT_CORPUS_PATH.exists(), "코퍼스 미수집 환경")
+class V16GoldenCaseTest(unittest.TestCase):
+    """T27~T31 — v1.6 신규 골든 케이스.
+
+    이번 회차의 교훈은 '기능 추가가 다른 기능을 오염시킬 수 있다'였다. 별표 수집
+    자체는 명세대로였는데, 검색 노출 방식을 함께 설계하지 않아 전 도메인의 응답
+    품질을 떨어뜨렸다. 그래서 여기서는 **응답 규모**까지 회귀 대상으로 잠근다.
+    """
+
+    ATTACHMENT_QUERY = "계약 체결 수의계약 금액 기준"
+    RESEARCH_FUND = "전남대학교 연구비 중앙관리지침"
+    LIBRARY = "전남대학교 도서관 규정"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.index = RuleSearchIndex()
+
+    def test_13_attachment_body_does_not_flood_search(self) -> None:
+        result = search_rule(self.ATTACHMENT_QUERY, k=8)
+        self.assertEqual([], [r for r in result["results"] if r.get("record_type") == "별표"])
+        total = sum(len(str(r["본문"])) for r in result["results"])
+        self.assertLess(total, 3_000, "별표 본문이 응답을 잠식하면 안 된다")
+
+    def test_14_omitted_attachment_is_announced(self) -> None:
+        result = search_rule(self.ATTACHMENT_QUERY, k=8)
+        self.assertGreaterEqual(result["attachments_omitted"], 1)
+        self.assertEqual(result["attachments_omitted"], len(result["attachments"]))
+        for row in result["attachments"]:
+            self.assertTrue(row["record_id"])
+            self.assertTrue(str(row["조문제목"]).strip(), "제외 별표는 제목으로 식별 가능해야 한다")
+
+    def test_13_attachment_body_truncated_when_included(self) -> None:
+        result = search_rule(self.ATTACHMENT_QUERY, k=8, include_attachments=True)
+        attachments = [r for r in result["results"] if r.get("record_type") == "별표"]
+        self.assertTrue(attachments)
+        for row in attachments:
+            self.assertLessEqual(len(row["본문"]), 200)
+            self.assertTrue(row["본문_절단"])
+            self.assertGreater(row["본문_길이"], 200)
+
+    def test_15_attachment_full_text_via_get_article(self) -> None:
+        article = get_article(self.RESEARCH_FUND, "별표 3")["article"]
+        self.assertIsNotNone(article)
+        self.assertGreater(len(article["본문"]), 20_000)
+
+    def test_16_attachment_has_title(self) -> None:
+        article = get_article(self.RESEARCH_FUND, "별표 3")["article"]
+        self.assertEqual("연구비 비목별 계상 및 집행기준", article["조문제목"])
+        self.assertEqual({"조문번호": "제22조", "항": "③"}, article.get("위임조문"))
+
+    def test_17_attachment_appears_in_inbound_of_delegating_article(self) -> None:
+        record_id = get_article(self.RESEARCH_FUND, "제22조")["record_id"]
+        inbound = get_related_articles(record_id, direction="inbound", resolve=False)["inbound"]
+        self.assertIn("별표 3", [row["source_article"] for row in inbound])
+
+    def test_18_no_untitled_record_except_source_side_blanks(self) -> None:
+        # 제목 없는 레코드는 **삭제 조문과 부칙 시행일 조항뿐**이어야 한다.
+        # 이 둘은 원문에 제목이 없다(원문 대조 확인) — 채우면 날조다.
+        untitled = [
+            (r["규정명"], r["조문번호"], r.get("record_type"))
+            for r in self.index.articles
+            if not str(r.get("조문제목", "")).strip()
+            and not r.get("is_repealed")
+            and r.get("record_type") != "부칙"
+        ]
+        self.assertEqual([], untitled)
+        self.assertEqual(
+            [],
+            [r["규정명"] for r in self.index.articles
+             if r.get("record_type") == "별표" and not str(r.get("조문제목", "")).strip()],
+        )
+
+    def test_19_unnamed_delegation_is_surfaced(self) -> None:
+        record_id = get_article(self.LIBRARY, "제20조")["record_id"]
+        result = get_related_articles(record_id, direction="both", resolve=False)
+        delegations = [e for e in result["unresolved"] if e["kind"] == "unnamed_delegation"]
+        self.assertEqual(3, len(delegations), delegations)
+        self.assertEqual(["②", "③", "④"], [e["clause"] for e in delegations])
+
+    def test_19_named_delegation_is_not_unnamed(self) -> None:
+        # '별표와 같다'처럼 위임처가 명시된 조문은 무지정 위임이 아니다.
+        record_id = get_article("전남대학교 전임교원 겸직에 관한 지침", "제9조")["record_id"]
+        result = get_related_articles(record_id, direction="outbound", resolve=False)
+        self.assertEqual(
+            [], [e for e in result["unresolved"] if e["kind"] == "unnamed_delegation"]
+        )
+
+    def test_20_external_law_not_reported_as_missing_rule(self) -> None:
+        record_id = get_article("전남대학교 행정감사규정", "제16조")["record_id"]
+        result = get_related_articles(record_id, direction="both", resolve=False)
+        law = [e for e in result["unresolved"] if "회계관계직원" in e["raw"]]
+        self.assertTrue(law)
+        self.assertEqual("external_law", law[0]["kind"])
+        self.assertEqual(4, len(result["inbound"]))
+
+    def test_21_coverage_is_reported_with_its_denominator(self) -> None:
+        stats = get_corpus_stats()
+        self.assertEqual(stats["조문_수"], stats["색인_문서_수"])
+        self.assertTrue(stats["수집_범위_기준일"])
+        self.assertGreater(stats["게시_규정_수"], stats["규정_수"] - 1)
+        self.assertTrue(stats["수집_공백_편제"], "공백을 숨기지 않는다")
+
+    def test_7_list_rules_still_reports_chongmugwa(self) -> None:
+        self.assertEqual(9, list_rules(division="총무과")["count"])
+
+    def test_11_12_domain_queries_have_no_false_positive(self) -> None:
+        # 감사 질의는 행정감사·산학협력단감사 두 규정이 모두 정답이다(둘 다 감사 규정).
+        for query, allowed in (
+            ("도서관 자료 대출 연체 변상", {self.LIBRARY}),
+            ("감사 실시 결과 처리",
+             {"전남대학교 행정감사규정", "전남대학교 산학협력단감사규정"}),
+        ):
+            with self.subTest(query=query):
+                hits = self.index.search(query, k=8)
+                self.assertTrue(hits)
+                self.assertTrue(
+                    all(row["규정명"] in allowed for row in hits),
+                    [(r["규정명"], r["조문번호"]) for r in hits],
+                )
 
 
 class StructureIdempotencyTest(unittest.TestCase):

@@ -16,7 +16,7 @@ try:
     SERVER_VERSION = metadata.version("cnu-rule-compass")
 except metadata.PackageNotFoundError:
     # 미설치(PYTHONPATH 직접 실행) 환경 폴백 — pyproject.toml [project].version과 동기.
-    SERVER_VERSION = "1.5.0"
+    SERVER_VERSION = "1.6.0"
 
 TOOL_NAMES = (
     "search_rule",
@@ -44,11 +44,17 @@ def search_rule(
     k: int = 5,
     include_superseded: bool = False,
     include_repealed: bool = False,
+    include_attachments: bool = False,
 ) -> dict:
     """자연어 질의와 관련된 공식 규정 조문을 반환한다.
 
     기본값은 현행·유효 조문만이다. 구판본(is_current=false)이나 삭제된 조문
     (is_repealed=true)은 감사 대응 등 필요한 경우에만 include_* 로 켠다.
+
+    별표(record_type="별표")는 기본 제외한다 — 본문이 조문의 수십 배라 응답을
+    잠식한다(T27). 제외한 경우 attachments_omitted·attachments로 무엇이 빠졌는지
+    함께 돌려주며, 전문은 get_article로 조회한다. include_attachments=True로 켜면
+    검색 결과에 포함하되 본문은 앞 200자만 싣는다.
     """
     if not isinstance(query, str) or not query.strip():
         return _invalid_argument("query", "query는 비어 있지 않은 문자열이어야 합니다.")
@@ -58,19 +64,36 @@ def search_rule(
         return _invalid_argument("k", "k는 정수여야 합니다.")
     if not 1 <= k <= 20:
         return _invalid_argument("k", "k는 1 이상 20 이하여야 합니다.")
-    for name, flag in (("include_superseded", include_superseded), ("include_repealed", include_repealed)):
+    for name, flag in (
+        ("include_superseded", include_superseded),
+        ("include_repealed", include_repealed),
+        ("include_attachments", include_attachments),
+    ):
         if not isinstance(flag, bool):
             return _invalid_argument(name, f"{name}은(는) 참/거짓이어야 합니다.")
     index = get_default_index()
-    results = index.search(
-        query, k=k, include_superseded=include_superseded, include_repealed=include_repealed
+    found = index.search_detailed(
+        query,
+        k=k,
+        include_superseded=include_superseded,
+        include_repealed=include_repealed,
+        include_attachments=include_attachments,
     )
+    results = found["results"]
     response = {
         "query": query,
         "count": len(results),
         "results": results,
         "status": "ok" if results else "not_found",
     }
+    if found["attachments_omitted"]:
+        # 조용히 빼지 않는다 — 별표에 답이 있는 질의였을 수 있다.
+        response["attachments_omitted"] = found["attachments_omitted"]
+        response["attachments"] = found["attachments"]
+        response["attachments_note"] = (
+            "관련도 상위에 별표가 있었으나 본문이 길어 결과에서 제외했습니다. "
+            "attachments의 record_id로 get_article을 호출하면 전문을 조회할 수 있습니다."
+        )
     if len(results) <= 1:
         # 결과가 없거나 빈약할 때, 그것이 '코퍼스에 개념 부재'인지 '검색 실패'인지
         # 소비자가 구별할 수 있게 근거를 준다 (T7).
@@ -254,6 +277,34 @@ def list_articles(
     }
 
 
+def _coverage_summary() -> dict:
+    """게시 목록 대비 수집률 요약을 읽어온다 (scripts/coverage_report.py 산출물)."""
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "data" / "coverage_report.json"
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    gaps = [
+        f"{entry['편제']}({entry['수집']}/{entry['게시']})"
+        for entry in report.get("편제별", [])
+        if entry.get("수집률", 1) < 1
+    ]
+    return {
+        "수집_범위_기준일": report.get("수집_범위_기준일"),
+        "대상_대비_수집률": report.get("대상_대비_수집률"),
+        "게시_규정_수": report.get("게시_규정_수"),
+        "수집_공백_편제": gaps,
+        "수집_범위_설명": (
+            "게시 목록(스냅샷) 대비 수집률입니다. 규정 계층은 전수 수집이고, "
+            "지침 계층은 관련도 선별 수집이라 공백이 있습니다. "
+            "공백 편제의 질의는 '규정 없음'이 아니라 '수집 범위 밖'일 수 있습니다."
+        ),
+    }
+
+
 def get_corpus_stats() -> dict:
     """코퍼스 규모·분포와 색인 정합성을 반환한다 (T1 재발 감시용)."""
     index = get_default_index()
@@ -289,8 +340,14 @@ def get_corpus_stats() -> dict:
         "구판본_조문_수": sum(1 for row in articles if not row.get("is_current", True)),
         "삭제_조문_수": sum(1 for row in articles if row.get("is_repealed", False)),
         "문자손상_조문_수": sum(1 for row in articles if row.get("text_integrity")),
+        "별표_수": sum(1 for row in articles if row.get("record_type") == "별표"),
         "status": "ok",
     }
+    # 분모를 밝힌다 (T30). 규정 수만 보면 그것이 전체의 몇 %인지 알 수 없어,
+    # '검색이 못 찾은 것'과 '애초에 수집하지 않은 것'을 구별할 수 없다.
+    coverage = _coverage_summary()
+    if coverage:
+        stats.update(coverage)
     if indexed != len(articles):
         stats["warning"] = f"색인({indexed})과 레코드({len(articles)}) 수가 다릅니다 — 색인 재빌드 필요"
     if unintended:

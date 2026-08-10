@@ -10,7 +10,9 @@ WORKDIR /app
 RUN pip install --no-cache-dir "mcp>=1.20,<2"
 
 COPY src ./src
-COPY data/rules_corpus.json data/lineage_corpus.json data/integrity_selfcheck_samples.json ./data/
+# coverage_report.json은 get_corpus_stats가 '분모'(게시 대비 수집률)를 보고할 때 읽는다.
+# 없으면 그 필드만 빠지고 나머지는 그대로 동작한다 (T30).
+COPY data/rules_corpus.json data/lineage_corpus.json data/integrity_selfcheck_samples.json data/coverage_report.json ./data/
 
 ENV PORT=8080
 EXPOSE 8080

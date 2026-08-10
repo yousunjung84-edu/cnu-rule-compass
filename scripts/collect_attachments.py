@@ -27,28 +27,62 @@ from src.search import prepare_article  # noqa: E402
 
 CORPUS = ROOT / "data" / "rules_corpus.json"
 MARKDOWN = ROOT / "data" / "markdown"
-# '[별표]', '【별표 1】', '[별표 2의2]' 등
-HEADER_RE = re.compile(r"^\s*[\[【]\s*(별표[^\]】]*)\s*[\]】]\s*$", re.M)
+# '[별표]', '【별표 1】', '## [별표1] 주차요금표', '<별표 1 > <개정 …>' 등 세 가지 괄호 계열.
+# v1.5의 엄격 패턴은 '괄호만 있는 줄'만 인정해 **제목이 같은 줄에 붙은 52건을 통째로
+# 놓쳤다**(이해충돌지침 징계양정기준·주차요금표 등 판단 기준이 별표에만 있는 것들).
+HEADER_RE = re.compile(
+    r"^#{0,4}\s*[\[【<]\s*(?P<label>별표\s*[^\]】>]*?)\s*[\]】>]\s*(?P<inline>[^\n]*)$", re.M
+)
 TITLE_RE = re.compile(r"^#+\s*(.+)$", re.M)
+# 목차 줄: 제목 뒤에 점선·쪽수가 붙는다. 본문 헤더가 아니므로 블록으로 잡으면 안 된다.
+TOC_TAIL_RE = re.compile(r"(?:[-.]{3,}\s*\d+|\s\d+)\s*$")
+# '[별표 1]과 같다' 같은 문장 안 인용 — 헤더가 아니다.
+SENTENCE_TAIL_RE = re.compile(r"(?:같다|따른다|의하다|참조)[.。]?\s*$")
+
+
+def _normalize_label(label: str) -> str:
+    """'별표1', '별표 1.' → '별표 1' (표기 흔들림을 조문번호에서 흡수한다)."""
+    text = " ".join(str(label).split()).rstrip(".")
+    match = re.fullmatch(r"별표\s*(.*)", text)
+    if not match:
+        return text
+    rest = match.group(1).strip()
+    return f"별표 {rest}" if rest else "별표"
 
 
 def extract(text: str) -> list[tuple[str, str, str]]:
     """(별표 라벨, 제목, 본문) 목록. 다음 별표 헤더 전까지를 한 덩이로 본다."""
-    headers = list(HEADER_RE.finditer(text))
+    headers = [
+        match
+        for match in HEADER_RE.finditer(text)
+        if not TOC_TAIL_RE.search(match.group("inline").strip())
+        and not SENTENCE_TAIL_RE.search(match.group("inline").strip())
+    ]
     blocks: list[tuple[str, str, str]] = []
     for index, header in enumerate(headers):
         start = header.end()
         end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
         body = text[start:end].strip()
+        inline = header.group("inline").strip().lstrip("#").strip()
+        # 제목 뒤 개정 표기 '<개정 2025. 2. 17.>'는 마크업이므로 제목에서 뺀다
+        # (본문은 건드리지 않는다 — 표시용 제목만 다듬는다).
+        inline = re.sub(r"\s*<[^>]*>\s*$", "", inline).strip()
+        title = inline if inline and not inline.startswith("<") else ""
+        if not title:
+            title_match = TITLE_RE.search(body)
+            if title_match and title_match.start() < 80:
+                title = title_match.group(1).strip()
+                body = (body[: title_match.start()] + body[title_match.end():]).strip()
         if not body:
             continue
-        title_match = TITLE_RE.search(body)
-        title = title_match.group(1).strip() if title_match else ""
-        if title_match:
-            body = (body[: title_match.start()] + body[title_match.end():]).strip()
-        label = " ".join(header.group(1).split())
-        blocks.append((label, title, body))
-    return blocks
+        blocks.append((_normalize_label(header.group("label")), title, body))
+    # 같은 라벨이 두 번 잡히면(목차 잔재 등) 본문이 긴 쪽을 정본으로 본다.
+    best: dict[str, tuple[str, str, str]] = {}
+    for label, title, body in blocks:
+        if label not in best or len(body) > len(best[label][2]):
+            best[label] = (label, title, body)
+    order = list(dict.fromkeys(label for label, _, _ in blocks))
+    return [best[label] for label in order]
 
 
 def main() -> int:
@@ -95,6 +129,12 @@ def main() -> int:
 
     if not added:
         print(json.dumps({"추가": 0, "메모": "새로 편입할 별표가 없습니다(멱등)."}, ensure_ascii=False))
+        return 0
+    if "--dry-run" in sys.argv:
+        print(json.dumps({
+            "추가_예정": len(added),
+            "목록": [f"{a['규정명']} / {a['조문번호']} / {a['조문제목']} ({len(a['본문'])}자)" for a in added],
+        }, ensure_ascii=False, indent=1))
         return 0
 
     backup = CORPUS.with_suffix(".json.pre_attachments")

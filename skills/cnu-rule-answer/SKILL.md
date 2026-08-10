@@ -5,7 +5,7 @@ description: 'cnu-rule-compass MCP(전남대 규정·지침 코퍼스)로 학생
 
 # cnu-rule-answer
 
-> **스킬 v1.4.0 · 기준 서버 버전: cnu-rule-compass v1.5.0** (2026-08-10).
+> **스킬 v1.5.0 · 기준 서버 버전: cnu-rule-compass v1.6.0** (2026-08-11).
 > 이 문서의 도구 계약·동작 기술은 그 버전 관측이다. `get_corpus_stats`로 현재 상태를
 > 확인할 수 있다. v1.0.0에서 관측되던 색인 누락·다중어 질의 축소·꼬리 절 제목 오탐은
 > 서버에서 수정되어 이 문서에서 제거했다.
@@ -31,7 +31,7 @@ description: 'cnu-rule-compass MCP(전남대 규정·지침 코퍼스)로 학생
 
 | 도구 | 파라미터 | 용도 |
 |---|---|---|
-| `search_rule` | `query: string`, `k?: int (기본 5)`, `include_superseded?: bool (기본 false)`, `include_repealed?: bool (기본 false)` | 자연어 → 후보 조문. 진입점 |
+| `search_rule` | `query: string`, `k?: int (기본 5)`, `include_superseded?: bool (기본 false)`, `include_repealed?: bool (기본 false)`, `include_attachments?: bool (기본 false)` | 자연어 → 후보 조문. 진입점. **별표는 기본 제외** (아래 별표 항 참고) |
 | `get_article` | `rule_name: string`, `article_no: string`, `record_id?: string` | 규정명+조문번호로 단일 확정 조회 |
 | `get_article_as_of` | `rule_name: string`, `date: string`, `keyword?: string` | 특정 시점 유효 판본 (개정 계열 수집 규정 한정) |
 | `get_related_articles` | `record_id: string`, `direction?: "outbound"\|"inbound"\|"both"`, `resolve?: bool` | 상호참조 추적. 인용하는/인용받는 조문 |
@@ -57,6 +57,27 @@ description: 'cnu-rule-compass MCP(전남대 규정·지침 코퍼스)로 학생
 `규정명` `편제` `조문번호` `조문제목` `본문` `장` `절` `source_key` `source_url`
 `수집일시` `record_type` `revision` `record_id` `score` `matched_terms` `routing`
 `is_current` `superseded_by` `is_repealed` `repealed_date` `repealed_clauses` `repealed_items` `text_integrity`
+별표 레코드는 여기에 더해 `위임조문` `본문_길이` `표_수` `행_수` `본문_절단`을 가진다.
+
+### 별표(`record_type: "별표"`) — 검색에서 기본 제외된다
+
+별표 본문은 조문의 수십 배다(중앙값 1,710자 대 132자, 최대 39,840자). 검색 응답에
+전문이 섞이면 **관련도가 낮아도 컨텍스트를 잠식해** 정작 필요한 조문을 밀어낸다.
+그래서 `search_rule`은 별표를 결과에서 빼되, 뺐다는 사실을 함께 알린다.
+
+```json
+"attachments_omitted": 3,
+"attachments": [{"규정명": "...", "조문번호": "별표 3", "조문제목": "연구비 비목별 계상 및 집행기준",
+                 "record_id": "rule-4213-...", "본문_길이": 21128, "score": 14.85}]
+```
+
+- 이 블록이 있으면 **별표에 답이 있을 수 있다.** 제목을 보고 관련 있으면
+  `get_article(규정명, "별표 N")`으로 전문을 가져온다.
+- `include_attachments=true`로 켜면 결과에 포함되지만 본문은 앞 200자만 온다
+  (`본문_절단: true`). 인용은 반드시 `get_article` 전문으로 한다.
+- 별표는 대부분 표다. **표 전체를 마크다운으로 옮기지 않는다** — 필요한 행만 인용하고,
+  금액·비율 등 수치는 원문 링크 대조를 권고한다.
+- 별표 인용 형식: `「규정명」 별표 N(제목) — 제○조 위임`. `위임조문` 필드가 있으면 병기한다.
 
 ### `hints` — 결과가 0~1건일 때만 붙는다
 
@@ -202,16 +223,17 @@ get_related_articles(record_id, direction="both")
 - `unresolved` — 해소하지 못한 참조. `kind: "external_law"`는 국가 법령이라 이 코퍼스 밖이다.
   **이 목록을 무시하지 않는다.** 답변에 "이 조문은 고등교육법시행령을 인용한다"고 밝힐 근거다
 
-`kind` 5종:
+`kind` 8종:
 
 | kind | 뜻 | 답변에서 할 일 |
 |---|---|---|
 | `cross_rule` | 코퍼스 안 다른 규정 | 해소된 조문을 함께 제시 |
 | `same_rule` | 같은 규정 안 조문 | 같이 인용 |
-| `external_law` | 국가 법령 등 코퍼스 밖 | **조문 내용을 지어내지 않는다.** 법령명을 밝히고 국가법령정보센터 확인을 안내 |
+| `external_law` | 국가 법령 등 코퍼스 밖 | **조문 내용을 지어내지 않는다.** 법령명을 밝히고 국가법령정보센터 확인을 안내. 수집 누락이 **아니다** |
 | `external_law_unmatched` | 법령·외부 규정으로 보이나 사전 미등재 | 위와 같게 다루되 "확인 필요" 표현을 쓴다 |
 | `rule_level` | 조문 없이 **규정 전체**를 지목 | 그 규정도 함께 확인한다. `resolved: false`는 조문 단위 해소만 없다는 뜻 |
-| `external_rule_unmatched` | 규정 전체 지목인데 코퍼스에 없음 | 코퍼스 밖으로 안내 |
+| `external_rule_unmatched` | **교내 규정으로 보이는데** 코퍼스에 없음 | 수집 공백 신호다. "수집 범위 밖일 수 있다"로 안내 |
+| `unnamed_delegation` | `따로 정한다`처럼 **위임했으나 수임 규범 미특정** | '규정 없음'이 아니다. §6-B 3분화 참고 |
 | `attachment` | 별표·서식이 **코퍼스에 있음**(지침 계층) | 해소된 별표를 근거로 인용할 수 있다 |
 | `attachment_not_collected` | 별표·서식 위임인데 미수집 | §7-A "규정에 없는 부분"과 **구별해** 미수집으로 밝힌다 (`reason_code` 참조) |
 
@@ -265,6 +287,21 @@ get_related_articles(record_id, direction="both")
 
 수집 범위 밖인 것과 실제 부존재를 코퍼스만으로 구별할 수 없다.
 이 구별 불가능성을 사용자에게 숨기지 않는다.
+
+#### 부존재는 한 가지가 아니다 — 네 상태를 구별한다
+
+같은 "없다"라도 사용자가 다음에 할 일이 전혀 다르다. 뭉뚱그리면 잘못된 안내가 된다.
+
+| 상태 | 판정 근거 | 표현 | 안내 |
+|---|---|---|---|
+| 코퍼스에 조문 없음 | `count: 0` + `hints.query_terms_unmatched` | "근거 조문이 확인되지 않습니다" | 소관 부서 문의 |
+| 별표에 위임, 미수집 | `unresolved.kind = attachment_not_collected` | "규정은 별표 ○에 위임하고 있으나 별표는 미수집입니다" | 원문 링크로 확인 |
+| **무지정 위임** | `unresolved.kind = unnamed_delegation` | "규정이 하위 기준에 위임했으나 그 기준이 특정되지 않습니다" | 담당 부서에 하위 기준 문의 |
+| 수집 범위 공백 | `get_corpus_stats.수집_공백_편제`에 해당 편제 | "이 분야는 수집 범위에 공백이 있습니다" | 규정집 원문 확인 안내 |
+
+무지정 위임 실례 — 도서관 규정 제20조 제2·3·4항이 모두 `따로 정한다`이다.
+가장 흔한 문의인 **"몇 권을 며칠 빌릴 수 있나요"** 가 정확히 여기 걸린다.
+"규정에 없다"고 답하면 **틀린다.** 규정은 답했다 — 하위 기준에 넘긴다고.
 
 ## 6-2. AI 관련 문의
 
