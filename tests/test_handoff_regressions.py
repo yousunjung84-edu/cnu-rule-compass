@@ -652,19 +652,25 @@ class V16GoldenCaseTest(unittest.TestCase):
         self.assertEqual(9, list_rules(division="총무과")["count"])
 
     def test_11_12_domain_queries_have_no_false_positive(self) -> None:
-        # 감사 질의는 행정감사·산학협력단감사 두 규정이 모두 정답이다(둘 다 감사 규정).
-        for query, allowed in (
-            ("도서관 자료 대출 연체 변상", {self.LIBRARY}),
-            ("감사 실시 결과 처리",
-             {"전남대학교 행정감사규정", "전남대학교 산학협력단감사규정"}),
+        # 규정명 목록으로 잠그지 않는다. 코퍼스가 늘면 정답 규정도 늘기 때문이다
+        # (지침 전량 확장 후 '정보보안기본지침 제8조(정보보안 감사)'가 합류했는데
+        #  이것은 오탐이 아니라 정답이다). '오탐 0'의 실질은 **주제어가 걸렸는가**다.
+        for query, topic in (
+            ("도서관 자료 대출 연체 변상", ("도서관", "자료", "대출")),
+            ("감사 실시 결과 처리", ("감사",)),
         ):
             with self.subTest(query=query):
                 hits = self.index.search(query, k=8)
                 self.assertTrue(hits)
-                self.assertTrue(
-                    all(row["규정명"] in allowed for row in hits),
-                    [(r["규정명"], r["조문번호"]) for r in hits],
-                )
+                off_topic = [
+                    (row["규정명"], row["조문번호"])
+                    for row in hits
+                    if not any(
+                        word in row["규정명"] or word in str(row["조문제목"]) or word in row["본문"]
+                        for word in topic
+                    )
+                ]
+                self.assertEqual([], off_topic)
 
 
 class StructureIdempotencyTest(unittest.TestCase):

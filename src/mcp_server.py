@@ -16,7 +16,7 @@ try:
     SERVER_VERSION = metadata.version("cnu-rule-compass")
 except metadata.PackageNotFoundError:
     # 미설치(PYTHONPATH 직접 실행) 환경 폴백 — pyproject.toml [project].version과 동기.
-    SERVER_VERSION = "1.6.0"
+    SERVER_VERSION = "1.7.0"
 
 TOOL_NAMES = (
     "search_rule",
@@ -287,19 +287,23 @@ def _coverage_summary() -> dict:
         report = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+    # 공백 신호는 **현행 기준**으로만 낸다. 구판본 미수집은 답변 품질과 무관하고
+    # (is_current=false라 기본 검색에서 빠진다), 섞으면 경고가 잡음이 된다.
     gaps = [
-        f"{entry['편제']}({entry['수집']}/{entry['게시']})"
+        f"{entry['편제']}({entry['현행_수집']}/{entry['현행_게시']})"
         for entry in report.get("편제별", [])
-        if entry.get("수집률", 1) < 1
+        if entry.get("현행_수집률") is not None and entry["현행_수집률"] < 1
     ]
     return {
         "수집_범위_기준일": report.get("수집_범위_기준일"),
         "대상_대비_수집률": report.get("대상_대비_수집률"),
+        "현행_대비_수집률": report.get("현행_대비_수집률"),
         "게시_규정_수": report.get("게시_규정_수"),
+        "현행_게시_규정_수": report.get("현행_게시_규정_수"),
         "수집_공백_편제": gaps,
         "수집_범위_설명": (
-            "게시 목록(스냅샷) 대비 수집률입니다. 규정 계층은 전수 수집이고, "
-            "지침 계층은 관련도 선별 수집이라 공백이 있습니다. "
+            "게시 목록 대비 수집률입니다. 규정·지침 두 계층 모두 게시 전량을 대상으로 하며, "
+            "미수집분은 대부분 조문(제N조) 구조가 없는 항목식 문서입니다. "
             "공백 편제의 질의는 '규정 없음'이 아니라 '수집 범위 밖'일 수 있습니다."
         ),
     }

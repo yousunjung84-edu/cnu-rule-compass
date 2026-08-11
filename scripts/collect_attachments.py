@@ -30,8 +30,13 @@ MARKDOWN = ROOT / "data" / "markdown"
 # '[별표]', '【별표 1】', '## [별표1] 주차요금표', '<별표 1 > <개정 …>' 등 세 가지 괄호 계열.
 # v1.5의 엄격 패턴은 '괄호만 있는 줄'만 인정해 **제목이 같은 줄에 붙은 52건을 통째로
 # 놓쳤다**(이해충돌지침 징계양정기준·주차요금표 등 판단 기준이 별표에만 있는 것들).
+# 원문은 여는·닫는 괄호가 어긋나기도 한다 — '## [별표 1〕'(ASCII 여는 + U+3015 닫는).
+# 닫는 괄호 후보를 넓히고 라벨 길이를 20자로 제한한다. 제한이 없으면 라벨이
+# 다음 '>'까지 폭주해 '별표 2〕 ### … <table' 같은 인용 불가 조문번호가 생긴다.
 HEADER_RE = re.compile(
-    r"^#{0,4}\s*[\[【<]\s*(?P<label>별표\s*[^\]】>]*?)\s*[\]】>]\s*(?P<inline>[^\n]*)$", re.M
+    r"^#{0,4}\s*[\[【<〔]\s*(?P<label>별표[^\]】>〕』]{0,20}?)\s*[\]】>〕』]\s*"
+    r"(?P<inline>[^\n]*)$",
+    re.M,
 )
 TITLE_RE = re.compile(r"^#+\s*(.+)$", re.M)
 # 목차 줄: 제목 뒤에 점선·쪽수가 붙는다. 본문 헤더가 아니므로 블록으로 잡으면 안 된다.
@@ -42,7 +47,7 @@ SENTENCE_TAIL_RE = re.compile(r"(?:같다|따른다|의하다|참조)[.。]?\s*$
 
 def _normalize_label(label: str) -> str:
     """'별표1', '별표 1.' → '별표 1' (표기 흔들림을 조문번호에서 흡수한다)."""
-    text = " ".join(str(label).split()).rstrip(".")
+    text = " ".join(str(label).split()).strip("[]【】〔〕『』<>").rstrip(".")
     match = re.fullmatch(r"별표\s*(.*)", text)
     if not match:
         return text

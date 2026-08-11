@@ -5,9 +5,14 @@
 하나도 없다는 관측으로 처음 **수집 자체가 빠졌다**가 드러났다. 이 층위의 공백은
 검색 품질로는 메워지지 않는다 — 없는 규정은 찾을 수 없다.
 
-분모는 두 목록 스냅샷이다(둘 다 2026-07-24 수집).
-- 지침 계층: data/listing_snapshot_260724.json  (jnu.ac.kr 행정규정, 부서 편제)
-- 규정 계층: data/rule_site_listing_260724.json (law.go.kr 학칙공포, 규정집 편제)
+분모는 두 목록 스냅샷이다.
+- 지침 계층: data/listing_snapshot_260811.json  (jnu.ac.kr 행정규정 게시 전량 633건)
+- 규정 계층: data/rule_site_listing_260724.json (law.go.kr 학칙공포, 규정집 편제 281건)
+
+⚠️ 260724판 지침 목록(179건)은 **관련도 선별을 거친 뒤의 목록**이었다. 그것을 분모로
+쓰면 수집률이 실제보다 높게 나온다 — 분모를 잘못 잡으면 공백을 스스로 가린다.
+현행/구판본을 나눠 보고한다: 구판본은 기본 검색에서 빠지므로(is_current=false)
+답변 품질에 직결되는 것은 **현행 수집률**이다.
 
 **추정하지 않는다.** 규정 계층의 편제는 목록의 분류 번호를 이름으로 옮기지 않고,
 source_key로 코퍼스와 조인해 코퍼스가 실제로 붙인 편제만 쓴다. 조인되지 않은
@@ -25,10 +30,14 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 CORPUS = ROOT / "data" / "rules_corpus.json"
-GUIDELINE_LISTING = ROOT / "data" / "listing_snapshot_260724.json"
+# 지침 목록은 최신 스냅샷을 쓴다. 260724판(179건)은 **관련도 선별을 거친 목록**이라
+# 분모로 쓰면 수집률이 실제보다 높게 나온다 — 게시 전량은 633건이다(2026-08-11 실측).
+GUIDELINE_LISTING = ROOT / "data" / "listing_snapshot_260811.json"
 REGULATION_LISTING = ROOT / "data" / "rule_site_listing_260724.json"
-LISTING_DATE = "2026-07-24"
+LISTING_DATE = "2026-08-11"
 ID_RE = re.compile(r"[?&]ID=(\d+)")
+# 구판본 표기: '… (2024. 3. 27. 개정전)', '… (폐지)'
+PAST_VERSION_RE = re.compile(r"개정\s*전|이전|폐지|\(\s*\d{4}")
 
 
 def load_corpus() -> tuple[dict[str, str], dict[str, str]]:
@@ -68,6 +77,7 @@ def main() -> int:
         rows.append({
             **item,
             "수집": collected,
+            "현행": not bool(PAST_VERSION_RE.search(item["게시명"])),
             "편제": divisions.get(item["key"]) or item["게시편제"] or "(미상)",
         })
 
@@ -77,8 +87,12 @@ def main() -> int:
             "편제": row["편제"], "계층": row["계층"], "게시": 0, "수집": 0, "미수집": [],
         })
         entry["게시"] += 1
+        entry.setdefault("현행_게시", 0)
+        entry.setdefault("현행_수집", 0)
+        entry["현행_게시"] += row["현행"]
         if row["수집"]:
             entry["수집"] += 1
+            entry["현행_수집"] += row["현행"]
         else:
             entry["미수집"].append(row["게시명"])
 
@@ -90,6 +104,8 @@ def main() -> int:
 
     total_listed = len(rows)
     total_collected = sum(1 for row in rows if row["수집"])
+    current_listed = sum(1 for row in rows if row["현행"])
+    current_collected = sum(1 for row in rows if row["현행"] and row["수집"])
     report = {
         "수집_범위_기준일": LISTING_DATE,
         "목록_출처": {
@@ -99,6 +115,10 @@ def main() -> int:
         "게시_규정_수": total_listed,
         "수집_규정_수": total_collected,
         "대상_대비_수집률": round(total_collected / total_listed, 4) if total_listed else None,
+        "현행_게시_규정_수": current_listed,
+        "현행_수집_규정_수": current_collected,
+        # 구판본은 기본 검색에서 빠지므로(is_current=false), 답변 품질에 직결되는 것은 이쪽이다.
+        "현행_대비_수집률": round(current_collected / current_listed, 4) if current_listed else None,
         "코퍼스_규정_수": len({name for name in names.values() if name}),
         "목록_밖_코퍼스_규정_수": len(extra),
         "편제별": sorted(
@@ -109,6 +129,10 @@ def main() -> int:
                     "게시": entry["게시"],
                     "수집": entry["수집"],
                     "수집률": round(entry["수집"] / entry["게시"], 4),
+                    "현행_게시": entry["현행_게시"],
+                    "현행_수집": entry["현행_수집"],
+                    "현행_수집률": round(entry["현행_수집"] / entry["현행_게시"], 4)
+                    if entry["현행_게시"] else None,
                     "미수집": entry["미수집"],
                 }
                 for entry in by_division.values()
@@ -121,11 +145,14 @@ def main() -> int:
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"기준일 {LISTING_DATE} | 게시 {total_listed} / 수집 {total_collected} "
-          f"({report['대상_대비_수집률']:.1%})")
-    print(f"{'편제':<22}{'계층':<6}{'게시':>5}{'수집':>5}{'수집률':>9}")
+          f"({report['대상_대비_수집률']:.1%}) | 현행 {current_listed} / {current_collected} "
+          f"({report['현행_대비_수집률']:.1%})")
+    print(f"{'편제':<22}{'계층':<6}{'게시':>5}{'수집':>5}{'수집률':>8}{'현행':>7}{'현행률':>9}")
     for entry in report["편제별"]:
+        rate = entry["현행_수집률"]
         print(f"{entry['편제']:<22}{entry['계층']:<6}{entry['게시']:>5}{entry['수집']:>5}"
-              f"{entry['수집률']:>9.1%}")
+              f"{entry['수집률']:>8.1%}{entry['현행_게시']:>7}"
+              f"{(f'{rate:.1%}' if rate is not None else '—'):>9}")
         for name in entry["미수집"]:
             print(f"    - 미수집: {name}")
     print(f"\n목록 밖 코퍼스 규정 {len(extra)}건 (구판본·스냅샷 이후 추가분)")

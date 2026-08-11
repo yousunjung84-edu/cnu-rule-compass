@@ -59,6 +59,9 @@ def main() -> int:
         is_supplementary = (
             title in SUPPLEMENTARY_TITLE
             or (not title and bool(SUPPLEMENTARY_BODY.match(body)))
+            # 제목 없는 '이 지침 시행과 동시에 종전의 지침은 폐지한다' — 부칙의 폐지 조문이다.
+            # 본문 첫 문구가 이 형태면 제목이 없어도 본칙일 수 없다.
+            or (not title and bool(SUPPLEMENTARY_PAIR_BODY.match(body)))
             or (
                 bool(SUPPLEMENTARY_PAIR_TITLE.search(title))
                 and bool(SUPPLEMENTARY_PAIR_BODY.match(body))

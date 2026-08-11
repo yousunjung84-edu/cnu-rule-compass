@@ -110,7 +110,22 @@ def validate_source_url(source_url: object, source_key: object) -> bool:
 
 
 # 구판본 규정명 표기: '수업관리 지침(2012. 12. 26. 제정)', '… 규정(폐지)'
-_SUPERSEDED_NAME_RE = re.compile(r"^(?P<base>.+?)\s*\((?P<note>[^)]*(?:제정|개정|폐지)[^)]*)\)\s*$")
+_SUPERSEDED_NAME_RE = re.compile(
+    r"^(?P<base>.+?)\s*\((?P<note>"
+    r"[^)]*(?:제정|개정|폐지|이전)[^)]*"
+    # 꼬리 괄호가 날짜·연도뿐인 판본 표기도 있다: '… 면제지침 (2020. 6. 9.)', '… 지침(2012)'
+    r"|\s*\d{4}[^)]*"
+    r")\)\s*$"
+)
+# 규정명 자체가 '현행이 아님'을 선언하는 표기. 개정 때 규정명이 바뀌면
+# ('환경관리원 취업규칙' → '환경관리직 취업규칙') 같은 이름의 현행본이 없어
+# 구판본 판정이 실패한다 — 실제로 74개 규정 1,263조문이 현행으로 잡혀 있었다.
+# 대응 현행본을 못 찾더라도 **문언이 구판본이라고 말하면 구판본으로 본다.**
+# 꼬리 괄호에 연도가 박혀 있으면 판본 표기로 본다. 실제 표기는 제각각이다 —
+# '(2020. 6. 9.)', '(2012)', '(2016. 8. 26. 제정)', 오탈자 '(2024. 1. 10. 개전전)'.
+# 문구를 열거해 쫓아가는 대신 연도의 존재로 판정한다. 반대로 연도가 없는
+# '… 학과 신설·폐지 및 학사구조 개편 지침'은 주제어에 '폐지'가 있을 뿐 현행이다.
+_PAST_VERSION_NOTE_RE = re.compile(r"개정\s*전|이전|폐지|(?:19|20)\d{2}")
 # 삭제된 조문: 본문이 '삭제' 또는 '<삭제 2013. 7. 5.>'로 시작한다.
 _REPEALED_RE = re.compile(r"^\s*<?\s*삭제\s*(?P<date>\d{4}\.\s*\d{1,2}\.\s*\d{1,2}\.?)?")
 
@@ -349,7 +364,10 @@ class RuleSearchIndex:
         for row in articles:
             match = _SUPERSEDED_NAME_RE.match(row["규정명"])
             base = match.group("base").strip() if match else None
-            is_superseded = bool(base and base in current_names)
+            note = match.group("note") if match else ""
+            # ① 같은 이름의 현행본이 있다 ② 또는 규정명이 스스로 구판본이라 말한다
+            declared_past = bool(match and _PAST_VERSION_NOTE_RE.search(note))
+            is_superseded = bool(base and base in current_names) or declared_past
             row["is_current"] = not is_superseded
             row["superseded_by"] = (
                 current_by_key.get((base, str(row["조문번호"]))) if is_superseded else None
