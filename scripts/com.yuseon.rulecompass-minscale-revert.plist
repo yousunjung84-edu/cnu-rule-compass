@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.yuseon.rulecompass-minscale-revert</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/jeong-yuseon/rulecompass-build/scripts/disable_min_instances.sh</string>
+  </array>
+  <!-- 2026-08-19 09:00 — 8/18 14:00 시상식 발표 다음날. 실행 후 스스로 해제한다.
+       min-instances만 0으로 되돌린다. 메모리 2Gi는 인덱스(1.4GB) 때문에 유지. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Month</key><integer>8</integer>
+    <key>Day</key><integer>19</integer>
+    <key>Hour</key><integer>9</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/jeong-yuseon/rulecompass-build/data/min_instances_job.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/jeong-yuseon/rulecompass-build/data/min_instances_job.err</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
