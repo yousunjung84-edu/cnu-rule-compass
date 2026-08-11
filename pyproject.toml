@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cnu-rule-compass"
-version = "1.8.0"
+version = "1.9.0"
 description = "CNU 규정 나침반 — 전남대 규정 근거 AI 안내 인프라 (검색·조문 인용·시점 질의 MCP)"
 requires-python = ">=3.10"
 # 핵심 기능(검색·CLI·테스트)은 표준 라이브러리만 사용한다.

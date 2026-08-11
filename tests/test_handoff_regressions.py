@@ -716,6 +716,48 @@ class V16GoldenCaseTest(unittest.TestCase):
                 self.assertEqual([], off_topic)
 
 
+@unittest.skipUnless(DEFAULT_CORPUS_PATH.exists(), "코퍼스 미수집 환경")
+class AdvisoryTest(unittest.TestCase):
+    """v1.9.0 — 함정을 문서가 아니라 응답이 알린다.
+
+    회차마다 발견한 함정을 소비자 스킬 문서에 적어 왔는데, 그 방식은 코퍼스가
+    바뀌면 문서가 먼저 틀리고 문서를 읽지 않은 소비자에게는 전달되지 않는다.
+    **결과에서 판정 가능한 함정은 응답이 알린다.**
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.index = RuleSearchIndex()
+
+    def _codes(self, result: dict) -> set:
+        return {a["code"] for a in result.get("advisories", [])}
+
+    def test_item_style_result_points_to_upstream_norm(self) -> None:
+        result = search_rule("재입학 허가 신청", k=8)
+        self.assertIn("upstream_norm_check", self._codes(result))
+        advisory = next(a for a in result["advisories"] if a["code"] == "upstream_norm_check")
+        # 검색 상위에 없어도 상위 규범에 record_id로 닿아야 한다 — 이것이 계약이다.
+        upstream = {(u["규정명"], u["조문번호"]) for u in advisory["upstream"]}
+        self.assertIn(("전남대학교 학칙", "제30조"), upstream)
+        self.assertTrue(all(u["record_id"] for u in advisory["upstream"]))
+
+    def test_duplicate_titles_are_flagged(self) -> None:
+        # 교육혁신본부 운영 지침은 제2~5조 제목이 모두 '업무'이고 센터 구분은 장에만 있다.
+        result = search_rule("교육혁신본부 센터 업무", k=6)
+        self.assertIn("duplicate_article_title", self._codes(result))
+
+    def test_superseded_only_flagged_when_included(self) -> None:
+        self.assertNotIn("superseded_included", self._codes(search_rule("수강신청 정정", k=6)))
+        self.assertIn(
+            "superseded_included",
+            self._codes(search_rule("수강신청 정정", k=6, include_superseded=True)),
+        )
+
+    def test_clean_result_has_no_advisories(self) -> None:
+        # 신호는 붙을 때만 붙는다. 정상 결과에 잡음을 얹지 않는다.
+        self.assertNotIn("advisories", search_rule("도서관 자료 대출 연체 변상", k=5))
+
+
 class StructureIdempotencyTest(unittest.TestCase):
     """한 번 적용하면 본문에서 제목이 사라지므로, 재실행이 장/절을 지우면 안 된다."""
 

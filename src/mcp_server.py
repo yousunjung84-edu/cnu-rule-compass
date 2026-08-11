@@ -16,7 +16,7 @@ try:
     SERVER_VERSION = metadata.version("cnu-rule-compass")
 except metadata.PackageNotFoundError:
     # 미설치(PYTHONPATH 직접 실행) 환경 폴백 — pyproject.toml [project].version과 동기.
-    SERVER_VERSION = "1.8.0"
+    SERVER_VERSION = "1.9.0"
 
 TOOL_NAMES = (
     "search_rule",
@@ -94,6 +94,9 @@ def search_rule(
             "관련도 상위에 별표가 있었으나 본문이 길어 결과에서 제외했습니다. "
             "attachments의 record_id로 get_article을 호출하면 전문을 조회할 수 있습니다."
         )
+    advisories = _build_advisories(results)
+    if advisories:
+        response["advisories"] = advisories
     if len(results) <= 1:
         # 결과가 없거나 빈약할 때, 그것이 '코퍼스에 개념 부재'인지 '검색 실패'인지
         # 소비자가 구별할 수 있게 근거를 준다 (T7).
@@ -110,6 +113,105 @@ def search_rule(
             ),
         }
     return response
+
+
+def _build_advisories(results: list[dict]) -> list[dict]:
+    """결과를 보고 **소비자가 밟아야 할 다음 수**를 응답에 실어 보낸다.
+
+    지금까지 회차마다 발견한 함정을 소비자 스킬 문서에 적어 왔다. 그 방식은
+    두 가지로 새는데, (1) 코퍼스가 바뀌면 문서가 먼저 틀리고 (2) 문서를 읽지 않은
+    소비자에게는 전달되지 않는다. 함정이 **결과에서 판정 가능한 것**이라면
+    문서가 아니라 응답이 알리는 편이 정확하다 — hints·attachments_omitted가
+    그랬듯이. 여기 실리는 것은 판단이 아니라 신호다.
+    """
+    advisories: list[dict] = []
+
+    # ① 세부지침(항목식)이 상위에 오면 권한 근거는 상위 규범에 있다.
+    #    '재입학' 질의가 세부지침으로 채워지고 학칙 제30조가 밀려난 사례
+    #    (v1.8.0). 세부지침만 인용하면 근거를 빠뜨린 답이 된다.
+    items = [row for row in results if row.get("record_type") == "항목"]
+    if items:
+        index = _reference_index()
+        upstream: list[dict] = []
+        seen: set[tuple] = set()
+        for row in items:
+            record = index.get(row.get("record_id", ""))
+            if record is None:
+                continue
+            for entry in index.outbound(record, resolve=False)[0]:
+                if entry["kind"] != "cross_rule" or not entry["resolved"]:
+                    continue
+                key = (entry["target_rule"], entry["target_article"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                upstream.append({
+                    "규정명": entry["target_rule"],
+                    "조문번호": entry["target_article"],
+                    "record_id": entry["record_id"],
+                    "인용한_항목": f'{row["규정명"]} {row["조문번호"]}',
+                })
+        advisories.append({
+            "code": "upstream_norm_check",
+            "message": (
+                "결과에 세부지침(항목식)이 포함되어 있습니다. 세부지침은 절차를 정하고 "
+                "권한의 근거는 상위 규범(학칙·규정)에 있습니다. upstream의 조문을 함께 "
+                "확인해 근거와 절차를 같이 제시하세요."
+                if upstream
+                else "결과에 세부지침(항목식)이 포함되어 있습니다. 상위 규범을 "
+                     "get_related_articles로 확인하세요."
+            ),
+            "upstream": upstream[:8],
+        })
+
+    # ② 조문제목이 같은 레코드가 섞이면 제목만으로 구별할 수 없다.
+    #    교육혁신본부 운영 지침은 제2~5조 제목이 모두 '업무'이고 센터 구분은
+    #    장 필드에만 있다 — 제목으로 인용하면 다른 센터를 지목하게 된다.
+    titles: dict[tuple, list[dict]] = {}
+    for row in results:
+        title = str(row.get("조문제목", "")).strip()
+        if title:
+            titles.setdefault((row.get("규정명"), title), []).append(row)
+    ambiguous = [
+        {
+            "규정명": rule,
+            "조문제목": title,
+            "조문": [
+                {"조문번호": r.get("조문번호"), "장": r.get("장"), "절": r.get("절")}
+                for r in rows
+            ],
+        }
+        for (rule, title), rows in titles.items() if len(rows) > 1
+    ]
+    if ambiguous:
+        advisories.append({
+            "code": "duplicate_article_title",
+            "message": (
+                "같은 규정 안에 조문제목이 동일한 조문이 여럿 있습니다. 제목으로 인용하면 "
+                "다른 조문을 지목하게 됩니다. 조문번호와 장/절을 함께 밝히세요."
+            ),
+            "items": ambiguous[:5],
+        })
+
+    # ③ 구판본이 섞였을 때(include_superseded=true) 현행으로 오인하지 않게 한다.
+    superseded = [
+        {
+            "규정명": row.get("규정명"),
+            "조문번호": row.get("조문번호"),
+            "superseded_by": row.get("superseded_by"),
+        }
+        for row in results if not row.get("is_current", True)
+    ]
+    if superseded:
+        advisories.append({
+            "code": "superseded_included",
+            "message": (
+                "구판본 조문이 결과에 포함되어 있습니다(include_superseded). 현행 근거로 "
+                "인용하지 말고, 인용이 필요하면 '○○ 시점 판본'임을 답변에 명시하세요."
+            ),
+            "items": superseded[:5],
+        })
+    return advisories
 
 
 def get_article(rule_name: str, article_no: str, record_id: str | None = None) -> dict:
