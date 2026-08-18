@@ -15,7 +15,10 @@ set -u
 GCLOUD=/opt/homebrew/bin/gcloud
 PROJECT=academyinfo-mcp-2026
 REGION=asia-northeast3
-SERVICES=(cnu-rule-compass academyinfo-mcp)
+# 8/18 변경(박사 지시): cnu-rule-compass는 원복 대상에서 제외 — AIONI(전남대 AI 플랫폼)
+# 정식 커넥터로 등록되어 상시 운영 전환. 콜드 35초는 서비스 품질상 허용 불가.
+# academyinfo-mcp만 발표 다음날 원복한다.
+SERVICES=(academyinfo-mcp)
 LABEL=com.yuseon.rulecompass-minscale-revert
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/rulecompass-build/data/min_instances_job.log"
