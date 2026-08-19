@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.yuseon.rulecompass-corpus-refresh</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/jeong-yuseon/rulecompass-build/.venv/bin/python</string>
+    <string>/Users/jeong-yuseon/rulecompass-build/scripts/refresh_corpus.py</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/jeong-yuseon/rulecompass-build</string>
+  <!-- 매월 1일 04:30 — sentinel(03:00)·notion(03:30) 이후. 수집→정규화→테스트 게이트→
+       알림까지 자동. 배포는 하지 않는다(리포트의 배포_명령을 확인 후 실행). -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Day</key><integer>1</integer>
+    <key>Hour</key><integer>4</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/jeong-yuseon/rulecompass-build/data/corpus_refresh.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/jeong-yuseon/rulecompass-build/data/corpus_refresh.err</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

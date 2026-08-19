@@ -40,3 +40,7 @@ data/*.bak-*
 skill_bridge/
 .fablize/
 *.egg-info/
+data/rules_corpus.json.refresh-backup
+data/listing_snapshot_latest.json
+data/corpus_refresh*.log
+data/corpus_refresh_report.json

@@ -6,7 +6,7 @@
 
 ## 0. 사전 세팅 (발표 5분 전)
 - [ ] CLI 기동: `cd ~/rulecompass-build && python3 app.py` → "코퍼스 17,271개 조문" 확인 (8/11 지침 전량+별표+항목식 확장 후 실측. 제출 덱 수치는 1,687조문/105규정 기준 — 시연 멘트로 "제출 이후 계속 확장해 현재 **803규정 17,271조문, 현행 수집률 96.4%**" 성장 서사 활용 가능. ⚠️ 로컬 인덱스 빌드 7.6초 소요)
-- [ ] **앱 응답 확인**: `curl -s https://cnu-rule-compass-433006350023.asia-northeast3.run.app/health` → **`version:1.9.0, articles:17271, rules:803`** + 0.1초대 응답. ✅ `min-instances=1` 재점등 완료(8/17 00:23 실측, 콜드 35초→웜 0.07초). 원복은 **8/19 09:00 launchd 잡이 자동 수행**(`rulecompass-minscale-revert`) — 수동 원복 불필요
+- [ ] **앱 응답 확인**: `curl -s https://cnu-rule-compass-433006350023.asia-northeast3.run.app/health` → **`version:1.9.0, articles:17271, rules:803`** + 0.1초대 응답. ✅ `min-instances=1` 재점등 완료(8/17 00:23 실측, 콜드 35초→웜 0.07초). **상시 가동이 정책**(8/19 박사 확정) — 어떤 세션도 min-instances를 내리지 말 것
 - [ ] **참조 그래프 예열 (8/17 신설)**: 앱에서 아무 조문의 **관련 조문(get_related_articles)을 1회 조회** — 첫 inbound 호출이 그래프를 만들며 **7.8초 멈춤 실측**(이후 0.07초). 인스턴스가 재활용되면 캐시가 사라지므로 시연 직전 반드시 1회. 예: "학칙 제30조를 인용하는 조문 보여줘"
 - [ ] 앱: claude.ai **새 대화** + 커넥터 `cnu-rule-compass` 활성 확인 (⚠️ 스킬 잔존 시 커넥터보다 먼저 발동 — 스킬은 삭제 상태여야 함)
 - [ ] 폴백용 CLI 확인: `claude mcp list` → `cnu-rule-compass ✔ Connected`

@@ -38,7 +38,7 @@ from collect_rules import (  # noqa: E402
 CORPUS = ROOT / "data" / "rules_corpus.json"
 HWP_DIR = ROOT / "data" / "hwp"
 MD_DIR = ROOT / "data" / "markdown"
-SNAPSHOT = ROOT / "data" / "listing_snapshot_260811.json"
+SNAPSHOT = ROOT / "data" / "listing_snapshot_latest.json"
 FAILURES = ROOT / "data" / "failures_full.jsonl"
 
 

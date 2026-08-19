@@ -32,7 +32,7 @@ sys.path.insert(0, str(ROOT))
 CORPUS = ROOT / "data" / "rules_corpus.json"
 # 지침 목록은 최신 스냅샷을 쓴다. 260724판(179건)은 **관련도 선별을 거친 목록**이라
 # 분모로 쓰면 수집률이 실제보다 높게 나온다 — 게시 전량은 633건이다(2026-08-11 실측).
-GUIDELINE_LISTING = ROOT / "data" / "listing_snapshot_260811.json"
+GUIDELINE_LISTING = ROOT / "data" / "listing_snapshot_latest.json"
 REGULATION_LISTING = ROOT / "data" / "rule_site_listing_260724.json"
 LISTING_DATE = "2026-08-11"
 ID_RE = re.compile(r"[?&]ID=(\d+)")
