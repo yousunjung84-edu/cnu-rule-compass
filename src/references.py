@@ -114,12 +114,20 @@ _ATTACHMENT_RE = re.compile(
 _CLAUSE_MARKS = {f"제{i}항": mark for i, mark in enumerate("①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮", start=1)}
 
 
+# '법'으로 끝나지만 법령이 아닌 일반어 꼬리 (F1, 8/17 Codex·8/21 실측 평가방법 152회).
+# 이들이 법령으로 분류되면 "코퍼스 밖 법령"이라는 자신 있는 오답이 나간다.
+# 실제 법령명(근로기준법·병역법·헌법 등)은 이 꼬리로 끝나지 않는다.
+_NOT_A_LAW_TAIL = ("방법", "기법", "계산법", "수법", "용법", "요법", "문법", "어법", "화법")
+
+
 def _looks_like_external_law(name: str) -> bool:
     """법령 사전 또는 법령 접미사로 외부 규범임이 확인되는가 (T31).
 
     조문번호 유무와 무관하게 판정한다. 사전은 완결될 수 없으므로 접미사도 함께 본다.
     """
     text = name.strip()
+    if text.endswith(_NOT_A_LAW_TAIL):
+        return False
     if any(text.endswith(law) or law in text for law in _EXTERNAL_LAWS):
         return True
     return text.endswith(("법", "법률", "시행령", "시행규칙", "조례", "특별법"))
@@ -201,7 +209,7 @@ class ReferenceIndex:
             if any(stripped.endswith(law) or law in stripped for law in _EXTERNAL_LAWS):
                 return None, "external_law"
             name = stripped
-        if name.endswith(_EXTERNAL_SUFFIX):
+        if name.endswith(_EXTERNAL_SUFFIX) and not name.endswith(_NOT_A_LAW_TAIL):
             return None, "external_law"
         if quoted:
             # 낫표로 감싼 고유명사인데 코퍼스에도 사전에도 없다. 자기 규정 참조로
@@ -270,8 +278,20 @@ class ReferenceIndex:
         # — 세 항이 각각 위임한 것을 하나로 합치면 무엇이 비었는지 알 수 없다.
         for match in _UNNAMED_DELEGATION_RE.finditer(body):
             sentence = _sentence_at(body, match.start())
-            if _NAMED_TARGET_RE.search(sentence):
-                continue  # 위임 대상이 명시돼 있으면 무지정이 아니다
+            # 명시 위임 판정은 **위임 구절이 속한 문장**만 본다 (F2). 한 줄에 여러
+            # 문장이 붙는 원문('…둔다.② …은 따로 정한다')에서 줄 전체를 보면 앞
+            # 문장의 낫표·조문 때문에 뒷문장의 무지정 위임이 조용히 사라진다
+            # (실측 630건 중 35건 누락 — 조직 설치 규정 제3조의12 등).
+            scope_start = body.rfind("\n", 0, match.start()) + 1
+            scope = body[scope_start:match.start()]
+            cut = scope.rfind("다.")
+            if cut != -1:
+                scope = scope[cut + 2:]
+            if _NAMED_TARGET_RE.search(scope):
+                continue  # 같은 문장 안에 위임 대상이 명시돼 있다 ('제5조에서 따로 정한다')
+            # raw도 위임 문장만 담는다 — 줄 전체를 실으면 앞 문장의 낫표가 섞여
+            # "명시 위임인데 왜 무지정?"으로 읽힌다.
+            sentence = " ".join((scope + body[match.start():match.end()]).split())
             clause = None
             for mark in reversed(body[: match.start()]):
                 if mark in _CLAUSE_MARKS.values():
@@ -301,6 +321,8 @@ class ReferenceIndex:
                     or match.group("plain_name") or "").strip()
             if not name or name in _NOT_A_RULE_NAME or name in _VAGUE_PREFIX:
                 continue
+            if name.endswith(_NOT_A_LAW_TAIL):
+                continue  # '평가방법' 등 — 규정을 지목하는 참조가 아니다 (F1)
             raw_text = " ".join(match.group(0).split())
             resolved_name = self._alias.get(name) or self._alias.get(name.replace(" ", ""))
             if resolved_name is None:

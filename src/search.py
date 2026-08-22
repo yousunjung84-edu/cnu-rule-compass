@@ -589,10 +589,12 @@ class RuleSearchIndex:
         if include_attachments:
             results = [_summarize_attachment(row) for row in ranked[:k]]
             return {"results": results, "attachments_omitted": 0, "attachments": []}
-        # 별표를 뺐다면, 원래 상위 k건에 들어갈 예정이었던 것만 '제외'로 보고한다
-        # (뒤쪽에 걸린 무관한 별표까지 세면 경고가 잡음이 된다).
-        omitted = [row for row in ranked[:k] if row.get("record_type") == "별표"]
+        # 별표를 뺐다면 '반환된 마지막 조문보다 관련도가 높은 별표'를 전부 보고한다
+        # (F3). 상위 k 창 안만 세면, 뒤에서 보충된 조문 위에 있는 별표가 조용히
+        # 사라진다 — 반환 조문보다 순위가 높은데도 record_id조차 안내되지 않는다.
         results = [row for row in ranked if row.get("record_type") != "별표"][:k]
+        cutoff = ranked.index(results[-1]) + 1 if results else len(ranked)
+        omitted = [row for row in ranked[:cutoff] if row.get("record_type") == "별표"]
         return {
             "results": results,
             "attachments_omitted": len(omitted),

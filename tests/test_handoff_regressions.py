@@ -758,6 +758,67 @@ class AdvisoryTest(unittest.TestCase):
         self.assertNotIn("advisories", search_rule("도서관 자료 대출 연체 변상", k=5))
 
 
+@unittest.skipUnless(DEFAULT_CORPUS_PATH.exists(), "코퍼스 미수집 환경")
+class V191PatchTest(unittest.TestCase):
+    """8/17 Codex findings F1~F3 — 수정 전 재현을 먼저 잠근다 (v1.9.1 게이트)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.index = RuleSearchIndex()
+
+    @staticmethod
+    def _fixture_refs(body: str):
+        from src.references import ReferenceIndex
+
+        article = {
+            "규정명": "테스트 지침", "조문번호": "제1조", "조문제목": "테스트",
+            "본문": body, "source_key": "9999", "record_id": "rule-9999-t",
+        }
+        index = ReferenceIndex([article])
+        return index.outbound(article, resolve=False)
+
+    def test_f1_common_noun_ending_beop_is_not_a_law(self) -> None:
+        # '평가방법'은 법령이 아니다. 법령으로 분류하면 "코퍼스 밖 법령"이라는
+        # 자신 있는 오답이 된다(실측 152회).
+        _, unresolved = self._fixture_refs("성과 평가방법은 위원회의 심의를 거친다.")
+        wrong = [e for e in unresolved if "평가방법" in e["raw"]
+                 and e["kind"].startswith("external_law")]
+        self.assertEqual([], wrong, unresolved)
+
+    def test_f1_real_law_suffix_still_detected(self) -> None:
+        _, unresolved = self._fixture_refs("「근로기준법」 제50조를 준용한다.")
+        self.assertTrue(any(e["kind"] == "external_law" for e in unresolved), unresolved)
+
+    def test_f2_delegation_not_killed_by_earlier_reference_in_paragraph(self) -> None:
+        # 같은 문단 앞 문장의 낫표 인용이 뒷문장의 무지정 위임을 지우면 안 된다.
+        # 실제 사례(조직 설치 규정 제3조의12): 두 문장이 한 줄에 붙어 있다.
+        body = ("① 「소프트웨어 중심대학」사업의 원활한 추진을 위하여 "
+                "소프트웨어교육원을 총장 직속기구로 둔다."
+                "② 소프트웨어교육원의 조직 및 운영에 관한 사항은 따로 정한다.")
+        _, unresolved = self._fixture_refs(body)
+        found = [e for e in unresolved if e["kind"] == "unnamed_delegation"]
+        self.assertEqual(1, len(found), unresolved)
+        self.assertEqual("②", found[0]["clause"])
+
+    def test_f2_named_delegation_in_same_sentence_still_suppressed(self) -> None:
+        _, unresolved = self._fixture_refs("수당 지급은 제5조에서 따로 정한다.")
+        self.assertEqual(
+            [], [e for e in unresolved if e["kind"] == "unnamed_delegation"], unresolved
+        )
+
+    def test_f3_omitted_counts_every_attachment_above_returned_articles(self) -> None:
+        # 반환된 마지막 조문보다 관련도가 높은 별표는 전부 보고되어야 한다.
+        # 상위 k 창 안만 세면 뒤에서 보충된 조문 위의 별표가 조용히 사라진다.
+        result = self.index.search_detailed("귀하", k=5)
+        deep = self.index.search_detailed("귀하", k=20, include_attachments=True)["results"]
+        articles = [r for r in deep if r.get("record_type") != "별표"][:5]
+        self.assertTrue(articles)
+        cut = deep.index(articles[-1])
+        expected = len([r for r in deep[:cut] if r.get("record_type") == "별표"])
+        self.assertEqual(expected, result["attachments_omitted"])
+        self.assertEqual(result["attachments_omitted"], len(result["attachments"]))
+
+
 class StructureIdempotencyTest(unittest.TestCase):
     """한 번 적용하면 본문에서 제목이 사라지므로, 재실행이 장/절을 지우면 안 된다."""
 
