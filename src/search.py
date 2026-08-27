@@ -126,6 +126,13 @@ _SUPERSEDED_NAME_RE = re.compile(
 # 문구를 열거해 쫓아가는 대신 연도의 존재로 판정한다. 반대로 연도가 없는
 # '… 학과 신설·폐지 및 학사구조 개편 지침'은 주제어에 '폐지'가 있을 뿐 현행이다.
 _PAST_VERSION_NOTE_RE = re.compile(r"개정\s*전|이전|폐지|(?:19|20)\d{2}")
+# 연도 '접두'형 판본 표기: '2007년도 강사료 지급지침', '2010~2011학년도 …',
+# '2003-2006 입학자용 …'. 괄호 꼬리 판정(_PAST_VERSION_NOTE_RE)이 못 보는 사각으로,
+# 13개 지침 121조문이 현행 취급돼 '시간강사' 문의에 2007년 지침이 근거로 나갔다
+# (2026-08-27 교무과 축 검증). 같은 base 계열에서 **최신 연도판만 현행**으로 남긴다.
+_YEAR_PREFIX_RE = re.compile(
+    r"^\s*(?P<y1>(?:19|20)\d{2})\s*(?:[~\-.]\s*(?P<y2>\d{2,4}))?\s*(?:년도|학년도)?\s*"
+)
 # 삭제된 조문: 본문이 '삭제' 또는 '<삭제 2013. 7. 5.>'로 시작한다.
 _REPEALED_RE = re.compile(r"^\s*<?\s*삭제\s*(?P<date>\d{4}\.\s*\d{1,2}\.\s*\d{1,2}\.?)?")
 
@@ -382,6 +389,64 @@ class RuleSearchIndex:
                 # 항 마커가 소실돼 항 단위 판정이 침묵할 수 있다. 침묵을 '없음'으로
                 # 오해하지 않도록 미상임을 명시한다.
                 row["clause_index_undetermined"] = True
+
+        # 연도 접두형 계열: 최신 연도판만 현행. **강등만 하고 승격은 하지 않는다**
+        # (괄호 꼬리 규칙이 이미 구판 처리한 판본을 되살리면 안 된다).
+        series: dict[str, list[tuple[int, str]]] = {}
+        for name in {row["규정명"] for row in articles}:
+            match = _YEAR_PREFIX_RE.match(name)
+            if not match or not name[match.end():].strip():
+                continue  # 연도 접두가 아니거나, 이름 전체가 연도뿐이면 판본 표기가 아니다
+            year = int(match.group("y1"))
+            if match.group("y2"):
+                y2 = match.group("y2")
+                year = max(year, int(y2) if len(y2) == 4 else year // 100 * 100 + int(y2))
+            base = name[match.end():].replace(" ", "")
+            series.setdefault(base, []).append((year, name))
+        demoted = {
+            name
+            for editions in series.values() if len(editions) > 1
+            for year, name in editions if year < max(y for y, _ in editions)
+        }
+        if demoted:
+            latest_by_key = {
+                (row["규정명"], str(row["조문번호"])): row["record_id"]
+                for row in articles if row.get("is_current")
+            }
+            name_to_latest = {}
+            for editions in series.values():
+                top = max(editions)[1]
+                for _, name in editions:
+                    name_to_latest[name] = top
+            for row in articles:
+                if row["규정명"] in demoted and row.get("is_current"):
+                    row["is_current"] = False
+                    row["superseded_by"] = latest_by_key.get(
+                        (name_to_latest[row["규정명"]], str(row["조문번호"]))
+                    )
+
+        # 같은 이름이 복수 source_key로 게시된 중복 (v1.9.2 Codex 발견):
+        # 공동지도교수제 지침이 구 텍스트(2826)와 개정 포함(3670) 두 key로 무표기
+        # 게시돼 둘 다 현행 취급됐다. key는 시간순 증가가 실측 패턴 — 같은 이름이면
+        # **최신 key만 현행**으로 남기고, 나머지는 최신 key의 같은 조문으로 잇는다.
+        keys_by_name: dict[str, set[str]] = {}
+        for row in articles:
+            if row.get("is_current"):
+                keys_by_name.setdefault(row["규정명"], set()).add(str(row["source_key"]))
+        for name, keys in keys_by_name.items():
+            if len(keys) < 2 or not all(k.isdigit() for k in keys):
+                continue
+            latest_key = max(keys, key=int)
+            latest_articles = {
+                str(row["조문번호"]): row["record_id"]
+                for row in articles
+                if row["규정명"] == name and str(row["source_key"]) == latest_key
+            }
+            for row in articles:
+                if (row["규정명"] == name and row.get("is_current")
+                        and str(row["source_key"]) != latest_key):
+                    row["is_current"] = False
+                    row["superseded_by"] = latest_articles.get(str(row["조문번호"]))
 
     def _load_corpus(self) -> list[dict]:
         try:

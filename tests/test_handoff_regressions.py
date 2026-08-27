@@ -819,6 +819,79 @@ class V191PatchTest(unittest.TestCase):
         self.assertEqual(result["attachments_omitted"], len(result["attachments"]))
 
 
+@unittest.skipUnless(DEFAULT_CORPUS_PATH.exists(), "코퍼스 미수집 환경")
+class V192YearPrefixTest(unittest.TestCase):
+    """v1.9.2 — 연도 '접두'형 지침의 구판 판정 (교무과 축 검증에서 발견).
+
+    구판 판정이 괄호 '꼬리' 연도만 보므로, 이름 앞에 연도가 붙는 지침
+    (2007년도 강사료 지급지침 등)이 현행 취급됐다 — 실측 13개 지침 121조문.
+    '시간강사' 문의에 2007년 지침이 현행 근거로 나가는 사고 경로.
+
+    규칙: 같은 이름 계열(연도 접두 제거·공백 무시 base) 안에서
+    **최신 연도판만 현행**이다.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.index = RuleSearchIndex()
+
+    def _current(self, name: str) -> bool:
+        rows = [a for a in self.index.articles if a["규정명"] == name]
+        self.assertTrue(rows, f"{name} 코퍼스에 없음")
+        return all(a.get("is_current") for a in rows)
+
+    def test_old_year_prefixed_editions_are_superseded(self) -> None:
+        for name in ("2006년도 강사료 지급지침", "2007년도 강사료 지급지침",
+                     "2003-2006 입학자용 교과과정 편성 및 운영지침"):
+            with self.subTest(name=name):
+                self.assertFalse(self._current(name), f"{name}이 현행 취급되고 있다")
+
+    def test_latest_edition_in_each_series_stays_current(self) -> None:
+        # 계열 최신판까지 구판 처리하면 그 주제의 답이 통째로 사라진다.
+        for name in ("2022년도 전남대학교 교원 성과급적 연봉제 운영 지침",
+                     "2013~2014학년도 강사료 지급지침",
+                     "2015-2018 입학자용 교육과정 편성 및 운영 지침"):
+            with self.subTest(name=name):
+                self.assertTrue(self._current(name), f"계열 최신판 {name}이 구판 처리됐다")
+
+    def test_hourly_lecturer_query_not_grounded_on_2007(self) -> None:
+        hits = self.index.search("시간강사", k=5)
+        self.assertFalse(
+            [r["규정명"] for r in hits if r["규정명"].startswith(("2006", "2007", "2008"))],
+            [r["규정명"] for r in hits],
+        )
+
+
+@unittest.skipUnless(DEFAULT_CORPUS_PATH.exists(), "코퍼스 미수집 환경")
+class V192DuplicatePostingTest(unittest.TestCase):
+    """v1.9.2 — 같은 이름이 복수 key로 게시된 중복 (Codex 교차검증 발견).
+
+    공동지도교수제 시행 지침이 key 2826(구 텍스트)과 3670(2017 개정 포함)으로
+    **둘 다 무표기 게시**돼 둘 다 현행 취급됐다. 괄호 꼬리·연도 접두 어느 규칙에도
+    안 걸리는 제3의 stale-current 경로. key는 시간순 증가가 실측 패턴이므로
+    같은 이름이면 최신 key만 현행이다.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.index = RuleSearchIndex()
+
+    def test_same_name_multiple_keys_only_latest_current(self) -> None:
+        import collections
+        current_keys = collections.defaultdict(set)
+        for a in self.index.articles:
+            if a.get("is_current"):
+                current_keys[a["규정명"]].add(str(a["source_key"]))
+        dups = {n: ks for n, ks in current_keys.items() if len(ks) > 1}
+        self.assertEqual({}, dups, f"같은 이름·복수 key 현행 중복: {dups}")
+
+    def test_joint_advisor_guideline_resolves_to_newer_key(self) -> None:
+        rows = [a for a in self.index.articles
+                if a["규정명"] == "전남대학교 공동지도교수제 시행 지침" and a.get("is_current")]
+        self.assertTrue(rows)
+        self.assertEqual({"3670"}, {str(a["source_key"]) for a in rows})
+
+
 class StructureIdempotencyTest(unittest.TestCase):
     """한 번 적용하면 본문에서 제목이 사라지므로, 재실행이 장/절을 지우면 안 된다."""
 
