@@ -66,6 +66,7 @@ def reconcile_names() -> dict:
     """
     sys.path.insert(0, str(ROOT))
     from collect_rules import LIST_URL, http_get, parse_rule_list  # noqa: E402
+    from src.search import regulation_tier  # noqa: E402
 
     payload, _ = http_get(LIST_URL, timeout=60.0)
     rules = parse_rule_list(payload.decode("utf-8", errors="replace"))
@@ -84,8 +85,8 @@ def reconcile_names() -> dict:
     missing_keys: dict[str, str] = {}
     for row in corpus:
         key = str(row.get("source_key", ""))
-        if not key.isdigit() or len(key) > 6:
-            continue  # 지침 계층(짧은 숫자 key)만 — 규정 계층은 v1 범위 밖
+        if not key.isdigit() or regulation_tier(row):
+            continue  # 지침 계층만 — 규정 계층은 v1 범위 밖 (계층 판정은 코어 단일 진본)
         posted = listing.get(key)
         if posted is None:
             missing_keys.setdefault(key, row["규정명"])

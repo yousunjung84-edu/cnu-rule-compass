@@ -58,6 +58,28 @@ _GENERIC_TERMS = {
 }
 
 
+# 계층 판정 — 규정(학칙공포 정본) vs 지침(대학 게시판). **단일 진본** (2026-08-27).
+# 같은 개념이 세 곳에 서로 다른 기준으로 구현돼 있었다: references.py의
+# `len(source_key)>6`, mcp_server.py의 `편제.startswith("규정집/")`,
+# refresh_corpus.py의 `len(key)>6`. 전남대 코퍼스에서는 우연히 일치했지만
+# (17,281조문 대조, 불일치 0건) 타 대학에서는 갈라질 잠복 결함이었다.
+#
+# 판정 근거는 **source_key 형식**이다. 학칙공포(law.go.kr)는 13자리 일련번호를,
+# 대학 게시판은 4자리 안팎의 key를 쓴다. 타 대학 프로필화 시 이 임계값이
+# tier_rule로 빠질 자리이며, 그때 고칠 곳은 이 함수 하나다.
+REGULATION_KEY_MIN_LENGTH = 7
+
+
+def regulation_tier(article: dict) -> bool:
+    """이 레코드가 규정 계층(학칙공포 정본)인가. 아니면 지침 계층이다."""
+    return len(str(article.get("source_key", ""))) >= REGULATION_KEY_MIN_LENGTH
+
+
+def tier_label(article: dict) -> str:
+    """소비자 표시용 계층 이름."""
+    return "규정" if regulation_tier(article) else "지침"
+
+
 def _word_forms(word: str) -> set[str]:
     """조사 차이를 완화한 단어형과 한국어 부분 일치용 2·3-gram을 만든다."""
     forms = {word}

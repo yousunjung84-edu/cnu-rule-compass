@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 from importlib import metadata
 
-from src.search import get_default_index
+from src.search import get_default_index, tier_label
 
 
 try:
@@ -298,7 +298,7 @@ def list_rules(division: str | None = None, include_superseded: bool = False) ->
             "규정명": row["규정명"],
             "편제": row.get("편제"),
             "source_key": row.get("source_key"),
-            "계층": "규정" if str(row.get("편제", "")).startswith("규정집/") else "지침",
+            "계층": tier_label(row),
             "조문_수": 0,
             "수집일시": row.get("수집일시"),
             "is_current": row.get("is_current", True),

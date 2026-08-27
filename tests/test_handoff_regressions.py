@@ -892,6 +892,50 @@ class V192DuplicatePostingTest(unittest.TestCase):
         self.assertEqual({"3670"}, {str(a["source_key"]) for a in rows})
 
 
+@unittest.skipUnless(DEFAULT_CORPUS_PATH.exists(), "코퍼스 미수집 환경")
+class TierRuleTest(unittest.TestCase):
+    """계층 판정 일원화 (표준화 선행 작업, 2026-08-27).
+
+    같은 개념이 세 곳에 서로 다른 기준으로 구현돼 있었다 —
+    references.py `len(source_key)>6` / mcp_server.py `편제.startswith("규정집/")` /
+    refresh_corpus.py `len(key)>6`. 전남대 코퍼스에서는 우연히 일치했으나
+    (17,281조문 불일치 0건) 타 대학에서 갈라질 잠복 결함이다.
+
+    코어 함수 하나로 통합하고, 기존 판정과 100% 동일함을 계약으로 잠근다.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.index = RuleSearchIndex()
+
+    def test_core_tier_matches_both_legacy_rules(self) -> None:
+        from src.search import regulation_tier
+        for row in self.index.articles:
+            legacy_key = len(str(row.get("source_key", ""))) > 6
+            legacy_division = str(row.get("편제", "")).startswith("규정집/")
+            unified = regulation_tier(row)
+            self.assertEqual(legacy_key, unified, row["규정명"])
+            self.assertEqual(legacy_division, unified, row["규정명"])
+
+    def test_tier_label_unchanged_in_list_rules(self) -> None:
+        rules = list_rules(division="규정집/부속시설")["rules"]
+        self.assertTrue(rules)
+        self.assertTrue(all(r["계층"] == "규정" for r in rules))
+        guides = list_rules(division="교무과")["rules"]
+        self.assertTrue(guides)
+        self.assertTrue(all(r["계층"] == "지침" for r in guides))
+
+    def test_attachment_reason_code_unchanged(self) -> None:
+        # 규정 계층 = image_only, 지침 계층 = parser_scope (T17 계약)
+        regulation = get_related_articles(
+            get_article("전남대학교 학칙", "제44조")["record_id"],
+            direction="outbound", resolve=False,
+        )
+        codes = [e.get("reason_code") for e in regulation["unresolved"]
+                 if e["kind"] == "attachment_not_collected"]
+        self.assertIn("image_only", codes)
+
+
 class StructureIdempotencyTest(unittest.TestCase):
     """한 번 적용하면 본문에서 제목이 사라지므로, 재실행이 장/절을 지우면 안 된다."""
 

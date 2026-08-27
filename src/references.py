@@ -232,7 +232,9 @@ class ReferenceIndex:
         # 미수집 사유는 계층마다 다르다 (T17). 규정 계층(law.go.kr)은 별표를 이미지로
         # 제공해 텍스트가 없고, 지침 계층(jnu.ac.kr HWP)은 텍스트가 있으나 조문 파서가
         # '제N조' 헤더만 잡아 코퍼스에 넣지 못했다. 원인이 다르면 대응도 다르다.
-        is_regulation_tier = len(str(record.get("source_key", ""))) > 6
+        from src.search import regulation_tier
+
+        is_regulation_tier = regulation_tier(record)
         reason_code = "image_only" if is_regulation_tier else "parser_scope"
         reason_text = (
             "정본(law.go.kr)이 별표를 이미지로 제공해 텍스트 수집이 불가합니다. 원문 링크에서 확인하세요."
