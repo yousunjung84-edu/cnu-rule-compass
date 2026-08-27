@@ -8,20 +8,29 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from src.answer import answer
 from src.learn import capture
+from src.profile import active_profile
 
 
-_HTML = """<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>CNU 규정 나침반</title>
+# 서비스 이름·소개는 대학마다 다르다 → 프로필 주입. 본문에 JS 중괄호가 많아
+# f-string/format 대신 토큰 치환을 쓴다(중괄호 이스케이프로 HTML을 더럽히지 않는다).
+_HTML_TEMPLATE = """<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>__SERVICE_NAME__</title>
 <style>body{font-family:sans-serif;max-width:820px;margin:40px auto;padding:0 20px;color:#172b4d}
 textarea{width:100%;min-height:100px;padding:10px;box-sizing:border-box}button{margin-top:10px;padding:10px 18px}
 pre{white-space:pre-wrap;background:#f4f7fa;padding:16px;border-radius:8px;line-height:1.6}</style></head>
-<body><h1>🧭 CNU 규정 나침반</h1><p>전남대학교 공식 규정 조문을 찾아 원문 그대로 안내합니다.</p>
+<body><h1>🧭 __SERVICE_NAME__</h1><p>__TAGLINE__</p>
 <textarea id="q" placeholder="예: 전임교원 겸직 허가 절차"></textarea><br><button onclick="ask()">규정 찾기</button>
 <pre id="out">질문을 입력하세요.</pre><script>
 function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 async function ask(){const q=document.getElementById('q').value.trim();if(!q)return;
 const r=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
 const j=await r.json();document.getElementById('out').innerHTML=esc(j.response||j.error||'오류');}</script></body></html>"""
+
+_HTML = (
+    _HTML_TEMPLATE
+    .replace("__SERVICE_NAME__", active_profile().display_name)
+    .replace("__TAGLINE__", active_profile().portal_tagline)
+)
 
 
 def handle_question(question: str) -> dict:

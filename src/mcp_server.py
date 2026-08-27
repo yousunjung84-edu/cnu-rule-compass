@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 from importlib import metadata
 
+from src.profile import active_profile
 from src.search import get_default_index, tier_label
 
 
@@ -526,7 +527,7 @@ def create_server(**settings):
             "python -m src.mcp_server를 실행하세요."
         ) from exc
 
-    server = FastMCP("CNU 규정 나침반", **settings)
+    server = FastMCP(active_profile().display_name, **settings)
     # FastMCP는 version 인자를 받지 않아(SDK 1.28 기준) serverInfo.version이
     # SDK 버전으로 보고된다 — 하위 서버에 프로젝트 버전을 직접 지정한다.
     server._mcp_server.version = SERVER_VERSION

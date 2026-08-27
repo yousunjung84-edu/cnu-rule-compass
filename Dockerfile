@@ -10,6 +10,9 @@ WORKDIR /app
 RUN pip install --no-cache-dir "mcp>=1.20,<2"
 
 COPY src ./src
+# 대학 프로필(정체성·허용 호스트·URL 키 파라미터·계층 임계). 없으면 기동 시 즉시
+# 실패한다 — 빈 값이 호스트 검증에 스며드는 것보다 낫다(src/profile.py 참조).
+COPY profiles ./profiles
 # coverage_report.json은 get_corpus_stats가 '분모'(게시 대비 수집률)를 보고할 때 읽는다.
 # 없으면 그 필드만 빠지고 나머지는 그대로 동작한다 (T30).
 COPY data/rules_corpus.json data/lineage_corpus.json data/integrity_selfcheck_samples.json data/coverage_report.json ./data/

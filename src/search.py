@@ -14,7 +14,10 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from src.profile import active_profile
 
+
+_PROFILE = active_profile()
 _ROOT = Path(__file__).resolve().parent.parent
 # 전량 코퍼스(rules_corpus.json)는 로컬 전용(공개 배포 시 .gitignore). 공개 레포를
 # clone하면 전량이 없으므로, 민감 서식을 제외한 데모 샘플로 자동 폴백해 즉시 동작한다.
@@ -28,20 +31,23 @@ MAX_ARTICLE_LENGTH = 30_000
 MAX_ATTACHMENT_LENGTH = 60_000
 # 라우팅 동점 확장 상한 — 이보다 넓어지면 좁히는 의미가 없어 전체 검색으로 폴백한다.
 ROUTE_TIE_LIMIT = 30
-ALLOWED_SOURCE_HOST = "jnu.ac.kr"
-# 규정·학칙 계층 정본은 국가법령정보센터 학칙공포 서비스(law.go.kr)다
-# (rule.jnu.ac.kr 규정집이 이 서비스를 프레임으로 게시). key 대신 schlPubRulSeq로 대조한다.
-ALLOWED_REGULATION_HOST = "law.go.kr"
+# 허용 호스트·URL 식별 파라미터는 대학마다 다르다 → 프로필이 진본 (2026-08-27).
+# 규정·학칙 계층 정본은 국가법령정보센터 학칙공포 서비스(law.go.kr)이고
+# (rule.jnu.ac.kr 규정집이 이 서비스를 프레임으로 게시), key 대신 schlPubRulSeq로 대조한다.
+ALLOWED_SOURCE_HOST = _PROFILE.guideline_host
+ALLOWED_REGULATION_HOST = _PROFILE.regulation_host
 
 _STOPWORDS = {
     "규정", "규칙", "지침", "관련", "문의", "알려줘", "알려주세요", "어떻게",
-    "무엇", "뭐야", "되나요", "있나요", "대한", "관한", "경우", "사항", "전남대학교",
+    "무엇", "뭐야", "되나요", "있나요", "대한", "관한", "경우", "사항",
     "어떤", "다른", "필요한가요", "하려면", "절차가", "인가요",
     # 자연어 문의의 의문 표현 — 변별력이 없는데 커버리지 분모만 키운다
     # ('성적 이의신청 언제까지'가 1/3로 잘리던 문제).
     "언제", "언제까지", "얼마나", "어디", "어디서", "누구", "누가", "하나요",
     "할까요", "되는지", "가능한가요", "알려주실", "궁금합니다", "문의드립니다",
 }
+# 대학명은 모든 규정명에 붙어 변별력이 없다 — 프로필이 지정한 이름·접두를 제외한다.
+_STOPWORDS.update({_PROFILE.univ_name, *_PROFILE.name_prefixes})
 _PARTICLES = (
     "으로부터", "에서부터", "에게서", "까지는", "에서는", "으로는", "에게는",
     "으로", "에서", "에게", "한테", "부터", "까지", "처럼", "보다", "이나", "거나",
@@ -65,9 +71,9 @@ _GENERIC_TERMS = {
 # (17,281조문 대조, 불일치 0건) 타 대학에서는 갈라질 잠복 결함이었다.
 #
 # 판정 근거는 **source_key 형식**이다. 학칙공포(law.go.kr)는 13자리 일련번호를,
-# 대학 게시판은 4자리 안팎의 key를 쓴다. 타 대학 프로필화 시 이 임계값이
-# tier_rule로 빠질 자리이며, 그때 고칠 곳은 이 함수 하나다.
-REGULATION_KEY_MIN_LENGTH = 7
+# 대학 게시판은 4자리 안팎의 key를 쓴다. 임계값은 프로필 `tier_rule`이 진본이며
+# (2026-08-27 주입 완료), 타 대학에서 형식이 다르면 고칠 곳은 프로필 한 줄이다.
+REGULATION_KEY_MIN_LENGTH = _PROFILE.tier_min_length
 
 
 def regulation_tier(article: dict) -> bool:
@@ -122,13 +128,12 @@ def validate_source_url(source_url: object, source_key: object) -> bool:
     if parsed.scheme != "https":
         return False
     hostname = (parsed.hostname or "").lower().rstrip(".")
-    query = parse_qs(parsed.query)
-    expected = [str(source_key).strip()]
-    if hostname == ALLOWED_SOURCE_HOST or hostname.endswith("." + ALLOWED_SOURCE_HOST):
-        return query.get("key", []) == expected
-    if hostname == ALLOWED_REGULATION_HOST or hostname.endswith("." + ALLOWED_REGULATION_HOST):
-        return query.get("schlPubRulSeq", []) == expected
-    return False
+    # 허용 호스트와 그 호스트에서 key를 담는 파라미터 이름은 함께 움직인다
+    # (지침 게시판은 `key`, 학칙공포는 `schlPubRulSeq`) — 프로필이 짝으로 쥔다.
+    key_param = _PROFILE.key_param_for_host(hostname)
+    if key_param is None:
+        return False
+    return parse_qs(parsed.query).get(key_param, []) == [str(source_key).strip()]
 
 
 # 구판본 규정명 표기: '수업관리 지침(2012. 12. 26. 제정)', '… 규정(폐지)'

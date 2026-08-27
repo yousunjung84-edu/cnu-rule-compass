@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import re
 
+from src.profile import active_profile
+
 # 「규정명」 또는 맨앞 수식 없는 규정명 + 제N조(의M)(제K항)(각 호)
 _REFERENCE_RE = re.compile(
     # 낫표는 전각(「」 U+300C/D)만이 아니라 **반각(｢｣ U+FF62/3)**도 쓰인다.
@@ -155,11 +157,16 @@ class ReferenceIndex:
         for row in articles:
             self._by_key.setdefault((row["규정명"], str(row["조문번호"])), row)
 
-        # 별칭: 정식 규정명 + '전남대학교' 접두 제거형 (본문은 '학칙 제30조'처럼 줄여 쓴다)
+        # 별칭: 정식 규정명 + 대학명 접두 제거형 (본문은 '학칙 제30조'처럼 줄여 쓴다).
+        # 뗄 접두는 프로필 `name_prefixes`가 진본 — 대학마다 다르다.
+        prefixes = active_profile().name_prefixes
         self._alias: dict[str, str] = {}
         for name in {row["규정명"] for row in articles}:
             self._alias.setdefault(name, name)
-            short = name.replace("전남대학교", "").strip()
+            short = name
+            for prefix in prefixes:
+                short = short.replace(prefix, "")
+            short = short.strip()
             if short:
                 self._alias.setdefault(short, name)
         # 본문은 띄어쓰기를 자주 생략한다('전남대학교학칙', '전남대보안규정').

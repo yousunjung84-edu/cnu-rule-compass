@@ -1,0 +1,36 @@
+{
+  "univ_id": "jnu",
+  "univ_name": "전남대학교",
+  "name_prefixes": ["전남대학교"],
+  "service": {
+    "display_name": "CNU 규정 나침반",
+    "prompt_identity": "너는 전남대학교 규정 안내 도우미다.",
+    "portal_tagline": "전남대학교 공식 규정 조문을 찾아 원문 그대로 안내합니다.",
+    "cloud_run_service": "cnu-rule-compass"
+  },
+  "sources": {
+    "regulation": {
+      "type": "school_gazette",
+      "host": "law.go.kr",
+      "key_param": "schlPubRulSeq",
+      "query": "전남대학교",
+      "listing_via": "korean-law-mcp:search_decisions(domain=school)",
+      "text_via": "law.go.kr/DRF/lawService.do",
+      "measured_count": 281,
+      "measured_at": "2026-07-24"
+    },
+    "guideline": {
+      "type": "board_hwp",
+      "host": "jnu.ac.kr",
+      "key_param": "key",
+      "list_url": "https://www.jnu.ac.kr/WebApp/web/HOM/COM/Rule/AdminRule400.aspx",
+      "converter": "kordoc",
+      "measured_count": 633,
+      "measured_at": "2026-08-11"
+    }
+  },
+  "tier_rule": {
+    "by": "source_key_length",
+    "min_length": 7
+  }
+}

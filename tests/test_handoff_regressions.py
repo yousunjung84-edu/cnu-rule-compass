@@ -936,6 +936,62 @@ class TierRuleTest(unittest.TestCase):
         self.assertIn("image_only", codes)
 
 
+class ProfileInjectionTest(unittest.TestCase):
+    """대학 프로필 주입 계약 (2026-08-27, 표준화 2단계).
+
+    회귀 계약: **프로필화는 값의 정규화가 아니라 기존 JNU 값에 대한 설정 주입이다.**
+    profiles/jnu.json을 '정리'하려다 값이 바뀌면 URL 검증·별칭·계층이 조용히
+    흔들리고, 이미 발급된 인용이 깨진다. 그래서 값 자체를 여기에 못 박는다.
+    """
+
+    def test_jnu_profile_matches_preinjection_constants(self) -> None:
+        from src.profile import active_profile
+        from src.search import (ALLOWED_REGULATION_HOST, ALLOWED_SOURCE_HOST,
+                                REGULATION_KEY_MIN_LENGTH, _STOPWORDS)
+
+        profile = active_profile()
+        self.assertEqual("전남대학교", profile.univ_name)
+        self.assertEqual(("전남대학교",), profile.name_prefixes)
+        self.assertEqual("CNU 규정 나침반", profile.display_name)
+        self.assertEqual("너는 전남대학교 규정 안내 도우미다.", profile.prompt_identity)
+        self.assertEqual("jnu.ac.kr", ALLOWED_SOURCE_HOST)
+        self.assertEqual("law.go.kr", ALLOWED_REGULATION_HOST)
+        self.assertEqual(7, REGULATION_KEY_MIN_LENGTH)
+        self.assertIn("전남대학교", _STOPWORDS)
+
+    def test_key_param_is_paired_with_host(self) -> None:
+        """호스트와 키 파라미터는 짝이다 — 엇갈리면 검증을 통과하면 안 된다."""
+        from src.search import validate_source_url
+
+        self.assertTrue(validate_source_url(
+            "https://www.jnu.ac.kr/WebApp/web/HOM/COM/Rule/AdminRule400.aspx?key=3670", "3670"))
+        self.assertFalse(validate_source_url(
+            "https://www.jnu.ac.kr/WebApp/web/HOM/COM/Rule/AdminRule400.aspx?schlPubRulSeq=3670",
+            "3670"))
+        self.assertTrue(validate_source_url(
+            "https://www.law.go.kr/LSW/schlPubRulInfoP.do?schlPubRulSeq=1234567890123",
+            "1234567890123"))
+        self.assertFalse(validate_source_url(
+            "https://www.law.go.kr/LSW/schlPubRulInfoP.do?key=1234567890123", "1234567890123"))
+        self.assertFalse(validate_source_url(
+            "https://evil.example.com/x?key=3670", "3670"))
+
+    def test_missing_field_fails_loud(self) -> None:
+        """빈 값이 호스트 검증·stopword에 스며드는 것보다 기동 실패가 낫다."""
+        from src.profile import Profile, ProfileError
+
+        with self.assertRaises(ProfileError):
+            Profile({"univ_id": "x", "univ_name": "X"})
+
+    def test_dockerfile_ships_profiles(self) -> None:
+        """배포 이미지에 프로필이 없으면 서버가 기동하지 못한다."""
+        from pathlib import Path
+
+        dockerfile = (Path(__file__).resolve().parent.parent / "Dockerfile").read_text(
+            encoding="utf-8")
+        self.assertIn("COPY profiles ./profiles", dockerfile)
+
+
 class StructureIdempotencyTest(unittest.TestCase):
     """한 번 적용하면 본문에서 제목이 사라지므로, 재실행이 장/절을 지우면 안 된다."""
 

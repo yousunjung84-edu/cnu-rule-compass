@@ -14,6 +14,7 @@ import os
 import sys
 
 from src.mcp_server import SERVER_VERSION, create_server
+from src.profile import active_profile
 from src.search import get_default_index
 
 DEFAULT_PORT = 8080
@@ -60,7 +61,7 @@ def create_http_server():
         return JSONResponse(
             {
                 "status": "ok",
-                "name": "CNU 규정 나침반",
+                "name": active_profile().display_name,
                 "version": SERVER_VERSION,
                 "articles": len(index.articles),
                 "rules": len({row.get("규정명") for row in index.articles}),

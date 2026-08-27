@@ -9,10 +9,12 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from src.learn import list_candidates
+from src.profile import active_profile
 from src.search import RuleSearchIndex, get_default_index
 from src.store import JsonStore, get_default_store
 
 
+SERVICE_NAME = active_profile().display_name
 _ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT_PATH = _ROOT / "dashboard.html"
 
@@ -99,7 +101,7 @@ def render_html(state: dict) -> str:
     )
     return f"""<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CNU 규정 나침반 — 운영 대시보드</title>
+<title>{SERVICE_NAME} — 운영 대시보드</title>
 <style>
 :root{{--navy:#16294d;--blue:#3949ab;--gold:#c19a3e;--pale:#eef2f8;--line:#c8d4df;--ink:#182431;--gray:#657585}}
 *{{box-sizing:border-box}}
@@ -124,7 +126,7 @@ th{{background:var(--navy);color:white}} .muted{{color:var(--gray);font-size:13p
 .empty{{color:var(--gray);text-align:center;padding:16px}}
 .note{{margin-top:8px;font-size:12.5px;color:var(--gray)}}
 </style></head><body>
-<header><h1>🧭 CNU 규정 나침반 — 운영 대시보드</h1><div class="muted" style="color:#dbe7f2">공식 규정 코퍼스와 비식별 운영 로그 · 조문 원문 인용·미확인 응답 원칙</div></header>
+<header><h1>🧭 {SERVICE_NAME} — 운영 대시보드</h1><div class="muted" style="color:#dbe7f2">공식 규정 코퍼스와 비식별 운영 로그 · 조문 원문 인용·미확인 응답 원칙</div></header>
 <main class="wrap"><section class="cards">
 <div class="card"><div class="number">{corpus['regulation_count']}</div><div class="lbl">규정 수</div></div>
 <div class="card"><div class="number">{corpus['article_count']}</div><div class="lbl">조문 수 (무결성 검증 적재)</div></div>
@@ -152,7 +154,7 @@ def generate_html(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="CNU 규정 나침반 운영 대시보드")
+    parser = argparse.ArgumentParser(description=f"{SERVICE_NAME} 운영 대시보드")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT_PATH))
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--port", type=int, default=8792)
