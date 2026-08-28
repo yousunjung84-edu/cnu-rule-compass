@@ -1033,3 +1033,36 @@ class StructureIdempotencyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GetArticlePrefersCurrentTest(unittest.TestCase):
+    """같은 조문에 현행·구판이 있으면 현행을 준다 (2026-08-28 회귀).
+
+    get_article의 정렬 키에 is_current가 없어 revision 문자열 순서로 골랐고,
+    공동지도교수제 시행 지침 제1·2·3·5조가 **구판으로 응답**됐다(혼재 5쌍 중 4쌍).
+    v1.9.2에서 _annotate_versions가 같은 이름 복수 source_key를 강등하도록 고쳤는데
+    이 도구가 그 판정을 읽지 않았다. 강등 로직만 고치고 소비 경로를 잠그지 않으면
+    같은 사고가 다른 도구에서 되풀이된다.
+    """
+
+    @unittest.skipUnless(DEFAULT_CORPUS_PATH.exists(), "코퍼스 미수집 환경")
+    def test_current_wins_over_superseded(self) -> None:
+        from collections import defaultdict
+
+        from src.mcp_server import get_article
+        from src.search import get_default_index
+
+        index = get_default_index()
+        pairs = defaultdict(list)
+        for article in index.articles:
+            if article.get("record_type") == "본칙":
+                pairs[(article["규정명"], str(article["조문번호"]))].append(article)
+        mixed = [key for key, rows in pairs.items()
+                 if len({row.get("is_current") for row in rows}) > 1]
+        if not mixed:
+            self.skipTest("현행·구판이 함께 있는 조문이 이 코퍼스에 없습니다")
+        for rule_name, article_no in mixed:
+            found = get_article(rule_name, article_no).get("article")
+            self.assertIsNotNone(found)
+            self.assertTrue(found.get("is_current"),
+                            f"{rule_name} {article_no}이 구판으로 응답됐습니다")

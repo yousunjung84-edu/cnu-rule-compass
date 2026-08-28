@@ -235,6 +235,13 @@ def get_article(rule_name: str, article_no: str, record_id: str | None = None) -
     ]
     matches.sort(
         key=lambda article: (
+            # 현행을 먼저 고른다. 이 키가 없어 revision 문자열 순서로 골랐고,
+            # 공동지도교수제 시행 지침 제1·2·3·5조가 **구판으로 응답**됐다
+            # (2026-08-28 확인, 현행·구판 혼재 5쌍 중 4쌍). v1.9.2에서
+            # _annotate_versions가 같은 이름 복수 source_key를 강등하도록 고쳤는데,
+            # 이 도구가 그 판정을 읽지 않고 있었다.
+            # record_id를 명시한 호출은 위에서 이미 걸러지므로 영향받지 않는다.
+            not article.get("is_current", True),
             article.get("record_type") != "본칙",
             str(article.get("revision", "")),
             str(article.get("record_id", "")),
