@@ -983,6 +983,30 @@ class ProfileInjectionTest(unittest.TestCase):
         with self.assertRaises(ProfileError):
             Profile({"univ_id": "x", "univ_name": "X"})
 
+    def test_v3_sources_are_an_array_with_authority(self) -> None:
+        """v3 계약: sources는 배열이고 소스마다 authority를 갖는다 (2026-08-28).
+
+        소스와 계층이 직교한다는 실측에서 나왔다 — 한 소스가 여러 계층을 내고,
+        두 소스가 서로를 포함하지 않는 대학이 있다. 전남대는 두 소스가 겹치지
+        않아 둘 다 canonical이며, 이 값이 바뀌면 병합 정책이 달라진다.
+        """
+        from src.profile import active_profile
+
+        profile = active_profile()
+        self.assertEqual(3, profile._data["profile_schema_version"])
+        self.assertEqual(["regulation", "guideline"], [s["id"] for s in profile.sources])
+        self.assertEqual(
+            ["regulation", "guideline"],
+            [s["id"] for s in profile.sources_by_authority("canonical")])
+        self.assertEqual((), profile.sources_by_authority("mirror"))
+        self.assertEqual("none", profile._data["merge"]["mode"])
+
+    def test_unknown_source_id_fails_loud(self) -> None:
+        from src.profile import ProfileError, active_profile
+
+        with self.assertRaises(ProfileError):
+            active_profile().source("does-not-exist")
+
     def test_dockerfile_ships_profiles(self) -> None:
         """배포 이미지에 프로필이 없으면 서버가 기동하지 못한다."""
         from pathlib import Path

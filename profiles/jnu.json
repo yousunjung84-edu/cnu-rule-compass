@@ -1,4 +1,5 @@
 {
+  "profile_schema_version": 3,
   "univ_id": "jnu",
   "univ_name": "전남대학교",
   "name_prefixes": ["전남대학교"],
@@ -8,29 +9,44 @@
     "portal_tagline": "전남대학교 공식 규정 조문을 찾아 원문 그대로 안내합니다.",
     "cloud_run_service": "cnu-rule-compass"
   },
-  "sources": {
-    "regulation": {
+  "sources": [
+    {
+      "id": "regulation",
       "type": "school_gazette",
+      "authority": "canonical",
       "host": "law.go.kr",
       "key_param": "schlPubRulSeq",
       "query": "전남대학교",
-      "listing_via": "korean-law-mcp:search_decisions(domain=school)",
+      "listing_via": "korean-law-mcp:search_decisions(domain=school) 또는 law.go.kr/DRF/lawSearch.do target=school",
       "text_via": "law.go.kr/DRF/lawService.do",
       "measured_count": 281,
-      "measured_at": "2026-07-24"
+      "measured_at": "2026-07-24",
+      "level_classifier": { "by": "constant", "level": "regulation", "tier": "regulation" },
+      "current_classifier": { "by": "legacy_policy", "policy": "jnu_v1_9_2_four_rules" }
     },
-    "guideline": {
+    {
+      "id": "guideline",
       "type": "board_hwp",
+      "authority": "canonical",
       "host": "jnu.ac.kr",
       "key_param": "key",
       "list_url": "https://www.jnu.ac.kr/WebApp/web/HOM/COM/Rule/AdminRule400.aspx",
       "converter": "kordoc",
       "measured_count": 633,
-      "measured_at": "2026-08-11"
+      "measured_at": "2026-08-11",
+      "level_classifier": { "by": "constant", "level": "guideline", "tier": "guideline" },
+      "current_classifier": { "by": "legacy_policy", "policy": "jnu_v1_9_2_four_rules" }
     }
-  },
+  ],
   "tier_rule": {
     "by": "source_key_length",
-    "min_length": 7
+    "min_length": 7,
+    "_주의": "전남대 코퍼스 17,281조문의 계층 라벨·별표 사유 코드가 이 값에 걸려 있다. 변경 금지"
+  },
+  "merge": {
+    "mode": "none",
+    "_근거": "두 소스가 서로 다른 계층만 담당해 겹치지 않는다. 병합 대상 자체가 없다",
+    "rewrite_source_key": false,
+    "rewrite_record_id": false
   }
 }

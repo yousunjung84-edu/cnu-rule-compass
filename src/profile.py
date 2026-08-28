@@ -29,6 +29,13 @@ DEFAULT_PROFILE_ID = "jnu"
 
 _REQUIRED_TOP = ("univ_id", "univ_name", "name_prefixes", "service", "sources", "tier_rule")
 _REQUIRED_SERVICE = ("display_name", "prompt_identity", "portal_tagline")
+_REQUIRED_SOURCE = ("id", "host", "key_param")
+
+# v3 신설 (2026-08-28). 소스와 계층이 직교한다는 실측에서 나왔다 — 한 소스가 여러
+# 계층을 내고, 두 소스가 서로를 포함하지 않는 대학이 있다. `sources`를 배열로 바꾸고
+# 소스마다 authority(정본/미러)를 붙인다. 전남대는 두 소스가 서로 다른 계층만
+# 담당해 겹치지 않으므로 둘 다 canonical이고, 관측 동작은 v2와 동일해야 한다.
+CANONICAL, MIRROR = "canonical", "mirror"
 
 
 class ProfileError(RuntimeError):
@@ -46,6 +53,17 @@ class Profile:
         missing = [key for key in _REQUIRED_SERVICE if not service.get(key)]
         if missing:
             raise ProfileError(f"프로필 service 필수 항목 누락 {missing} ({path})")
+        sources = data["sources"]
+        if not isinstance(sources, list):
+            raise ProfileError(f"sources는 v3에서 배열이다 ({path})")
+        self._by_id: dict[str, dict] = {}
+        for entry in sources:
+            missing = [key for key in _REQUIRED_SOURCE if not entry.get(key)]
+            if missing:
+                raise ProfileError(f"source 필수 항목 누락 {missing} ({path})")
+            if entry["id"] in self._by_id:
+                raise ProfileError(f"source id 중복: {entry['id']} ({path})")
+            self._by_id[str(entry["id"])] = entry
         self._data = data
         self.path = path
 
@@ -77,13 +95,36 @@ class Profile:
         return str(self._data["service"]["portal_tagline"])
 
     # --- 출처 ---
+    def source(self, source_id: str) -> dict:
+        """소스 하나를 id로 꺼낸다. 없으면 예외 — 조용히 None을 흘리지 않는다."""
+        try:
+            return self._by_id[source_id]
+        except KeyError:
+            raise ProfileError(
+                f"source id '{source_id}' 없음. 있는 id: {sorted(self._by_id)} ({self.path})"
+            ) from None
+
+    @property
+    def sources(self) -> tuple[dict, ...]:
+        return tuple(self._data["sources"])
+
+    def sources_by_authority(self, authority: str) -> tuple[dict, ...]:
+        """`canonical` 소스만, 또는 `mirror` 소스만 고른다.
+
+        mirror는 단독으로 현행성을 주장하지 못한다 — 같은 규정이 canonical에도
+        있으면 canonical의 날짜·상태가 이긴다. (경북대 학칙공포가 자체 폐지본
+        31건을 '현행'으로 게시 중인 실측에서 나온 구분.)
+        """
+        return tuple(s for s in self._data["sources"]
+                     if str(s.get("authority", CANONICAL)) == authority)
+
     @property
     def guideline_host(self) -> str:
-        return str(self._data["sources"]["guideline"]["host"])
+        return str(self.source("guideline")["host"])
 
     @property
     def regulation_host(self) -> str:
-        return str(self._data["sources"]["regulation"]["host"])
+        return str(self.source("regulation")["host"])
 
     def key_param_for_host(self, hostname: str) -> str | None:
         """URL 질의에서 source_key와 대조할 파라미터 이름.
@@ -92,7 +133,7 @@ class Profile:
         호스트가 허용 목록에 없으면 None — 호출부가 검증 실패로 처리한다.
         """
         hostname = (hostname or "").lower().rstrip(".")
-        for entry in self._data["sources"].values():
+        for entry in self._data["sources"]:
             host = str(entry["host"]).lower()
             if hostname == host or hostname.endswith("." + host):
                 return str(entry["key_param"])
