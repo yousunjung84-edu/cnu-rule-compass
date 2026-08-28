@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import sys
 from importlib import metadata
 
@@ -31,6 +33,31 @@ TOOL_NAMES = (
 _REFERENCE_INDEX = None
 MAX_QUERY_LENGTH = 500
 _DATE_FORMAT = "YYYY-MM-DD"
+
+
+def _log_usage(tool: str, **fields) -> None:
+    """익명 사용 집계를 stdout에 구조화 JSON으로 남긴다 (2026-08-28, 박사 확정 (나)안).
+
+    **질의 원문을 저장하지 않는다.** 질의는 교직원이 무엇을 몰라 찾았는지를 드러내고,
+    인사·징계·연구년 같은 축이 섞이면 개인 추정이 가능하다. 발송한 운영지침의
+    '개인정보 최우선' 원칙과 서버가 충돌하면 안 된다.
+
+    `hints.query_terms_unmatched`도 싣지 않는다 — 진단에는 유용하지만 질의어의
+    부분집합이라 이름·학번이 그대로 남는다. **개수만** 남긴다.
+
+    남기는 것은 §D 피드백에 필요한 것뿐이다: 어떤 규정이 조회되나, not_found가
+    몇 건이나, 어떤 advisory가 자주 뜨나.
+
+    파일에 쓰지 않는다 — Cloud Run 파일시스템은 휘발성이라 재시작하면 사라진다.
+    stdout은 Cloud Logging이 자동 수집한다.
+    """
+    if os.environ.get("RULECOMPASS_USAGE_LOG", "1").strip() == "0":
+        return
+    try:
+        print(json.dumps({"usage": tool, **fields}, ensure_ascii=False), flush=True)
+    except Exception:
+        # 집계 실패가 도구 응답을 막지 않는다.
+        pass
 
 
 def _invalid_argument(field: str, message: str) -> dict:
@@ -113,6 +140,18 @@ def search_rule(
                 else "어휘는 코퍼스에 있으나 결과가 빈약합니다. get_related_articles로 상호참조를 따라가 보세요."
             ),
         }
+    _log_usage(
+        "search_rule",
+        status=response["status"],
+        count=len(results),
+        # 규정명은 공개 규정 이름이라 개인 추정에 쓰이지 않는다. 어떤 규정이
+        # 자주 조회되는지가 §D 피드백의 핵심 신호다.
+        rules=sorted({str(row.get("규정명", "")) for row in results})[:5],
+        advisories=[a.get("code") for a in response.get("advisories", [])],
+        attachments_omitted=response.get("attachments_omitted", 0),
+        # 질의어는 싣지 않는다. 못 찾은 단어의 **개수**만 남긴다.
+        unmatched_terms=len((response.get("hints") or {}).get("query_terms_unmatched") or []),
+    )
     return response
 
 
@@ -248,6 +287,15 @@ def get_article(rule_name: str, article_no: str, record_id: str | None = None) -
         )
     )
     article = matches[0] if matches else None
+    _log_usage(
+        "get_article",
+        status="ok" if article else "not_found",
+        # 규정명·조문번호는 공개 식별자다. 질의 원문이 아니라 도달한 대상을 남긴다.
+        rule=name if article else None,
+        article_no=number if article else None,
+        is_current=bool(article.get("is_current", True)) if article else None,
+        by_record_id=record_id is not None,
+    )
     return {
         "규정명": name,
         "조문번호": str(article_no).strip(),

@@ -14,7 +14,7 @@ from src.answer import _log_llm_usage, answer
 from src.integrity import IntegrityChecker
 from src.mcp_server import MAX_QUERY_LENGTH, get_article, main as mcp_main, search_rule
 from src.pii import redact, redact_value
-from src.search import MAX_ARTICLE_LENGTH, RuleSearchIndex
+from src.search import DEFAULT_CORPUS_PATH, MAX_ARTICLE_LENGTH, RuleSearchIndex
 from src.store import JsonStore, StoreCorruptionError
 
 
@@ -209,3 +209,51 @@ class SecurityHardeningTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UsageLogPrivacyTest(unittest.TestCase):
+    """익명 사용 집계에 질의 원문이 섞이면 안 된다 (2026-08-28, 박사 확정 (나)안).
+
+    질의는 교직원이 무엇을 몰라 찾았는지를 드러낸다. 인사·징계·연구년 축이 섞이면
+    개인 추정이 가능하고, 발송한 운영지침의 '개인정보 최우선' 원칙과 충돌한다.
+    필드를 하나 늘릴 때 실수로 질의를 싣는 일을 여기서 막는다.
+    """
+
+    @unittest.skipUnless(DEFAULT_CORPUS_PATH.exists(), "코퍼스 미수집 환경")
+    def test_query_text_never_reaches_usage_log(self) -> None:
+        import contextlib
+        import io
+
+        from src.mcp_server import search_rule
+
+        needle = "홍길동주민번호같은민감어"
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            search_rule(f"{needle} 학사경고")
+        logged = "\n".join(
+            line for line in buffer.getvalue().splitlines() if line.strip().startswith("{")
+        )
+        self.assertTrue(logged, "집계 로그가 비어 있습니다")
+        self.assertNotIn(needle, logged)
+        # 못 찾은 단어도 질의어의 부분집합이라 싣지 않는다 — 개수만 남긴다.
+        self.assertIn("unmatched_terms", logged)
+
+    def test_usage_log_can_be_disabled(self) -> None:
+        import contextlib
+        import io
+        import os
+
+        from src.mcp_server import _log_usage
+
+        buffer = io.StringIO()
+        previous = os.environ.get("RULECOMPASS_USAGE_LOG")
+        os.environ["RULECOMPASS_USAGE_LOG"] = "0"
+        try:
+            with contextlib.redirect_stdout(buffer):
+                _log_usage("search_rule", status="ok")
+        finally:
+            if previous is None:
+                os.environ.pop("RULECOMPASS_USAGE_LOG", None)
+            else:
+                os.environ["RULECOMPASS_USAGE_LOG"] = previous
+        self.assertEqual("", buffer.getvalue())
