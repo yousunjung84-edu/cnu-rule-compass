@@ -155,12 +155,30 @@ def main() -> int:
     report["변경"] = {"조문": after["조문"] - before["조문"], "규정": after["규정"] - before["규정"]}
     if changed:
         report["결과"] = "성공·배포 대기"
+        # 빌드는 **Cloud Build**로 한다. 이전 안내는 `docker buildx`였는데, 이 맥에는
+        # Docker Desktop이 없어(=/usr/local/bin/docker 심볼릭 링크만 남음) 그대로
+        # 따라 하면 command not found로 막힌다(2026-08-28 v1.9.3 배포에서 실측).
+        # Cloud Build는 로컬 도커가 필요 없고 linux/amd64로 빌드하므로 플랫폼 지정도
+        # 필요 없다. 업로드 범위는 .gcloudignore가 정한다 — 전량 코퍼스가 포함되어야
+        # 하므로 그 파일을 손대지 말 것.
+        image = (
+            "asia-northeast3-docker.pkg.dev/academyinfo-mcp-2026/cnu-rule-compass/"
+            f"cnu-rule-compass:corpus-{datetime.date.today():%y%m%d}"
+        )
         report["배포_명령"] = (
-            "docker buildx build --platform linux/amd64 -t asia-northeast3-docker.pkg.dev/"
-            "academyinfo-mcp-2026/cnu-rule-compass/cnu-rule-compass:corpus-"
-            f"{datetime.date.today():%y%m%d} --push . && gcloud run deploy cnu-rule-compass "
-            "--region=asia-northeast3 --image=asia-northeast3-docker.pkg.dev/academyinfo-mcp-2026/"
-            f"cnu-rule-compass/cnu-rule-compass:corpus-{datetime.date.today():%y%m%d} --quiet"
+            f"gcloud builds submit --tag {image} --region=asia-northeast3 . && "
+            f"gcloud run deploy cnu-rule-compass --region=asia-northeast3 --image={image} "
+            "--min-instances=1 --quiet"
+        )
+        # min-instances는 상시 가동 정책(2026-08-19 확정)이다. 배포 시 명시하지 않으면
+        # 기존 설정이 유지되지만, 명령만 보고 따라 하는 사람이 빠뜨리지 않게 박아 둔다.
+        report["배포_후_확인"] = (
+            "curl -s https://cnu-rule-compass-433006350023.asia-northeast3.run.app/health "
+            "# version·articles 확인 후 트래픽 100% 여부 점검"
+        )
+        report["롤백"] = (
+            "gcloud run services update-traffic cnu-rule-compass --region=asia-northeast3 "
+            "--to-revisions=<이전_revision>=100  # 재빌드 없이 되돌린다"
         )
         note = f"신규 {report['변경']['규정']}규정 {report['변경']['조문']}조문 — 배포 대기 (리포트 참조)"
     else:
