@@ -194,6 +194,40 @@ _YEAR_PREFIX_RE = re.compile(
 )
 # 삭제된 조문: 본문이 '삭제' 또는 '<삭제 2013. 7. 5.>'로 시작한다.
 _REPEALED_RE = re.compile(r"^\s*<?\s*삭제\s*(?P<date>\d{4}\.\s*\d{1,2}\.\s*\d{1,2}\.?)?")
+# **삭제 표시가 본문이 아니라 조문제목에 오는 소스가 있다.** 그때는 본문이 비어
+# 적재에서 `empty_body`로 탈락해 조문 번호 자체가 조회되지 않았다 — 수집기가 선언한
+# 계약("조문 자체는 버리지 않는다. 번호가 비어 있다는 사실도 조회 대상이기 때문이다")과
+# 어긋난다. 전남대 실측(2026-08-29): 탈락 6조문 + **본문이 있어 살아남았지만 삭제로
+# 표시되지 않은 7조문**. 후자가 더 나쁘다 — 삭제된 조문이 현행으로 인용된다
+# (사범대학부설중학교학칙 제30조, 법학전문대학원교학규정 제26조의2·3 등:
+# 제목='삭제', 본문='<2022. 10. 13.>'처럼 날짜만 남아 _REPEALED_RE가 놓쳤다).
+#
+# 공백이 낀 '삭 제'도 타 대학에서 실측된다. `\b`로 끝을 막아 '삭제대상', '삭제요청'
+# 같은 실제 조문제목을 삼키지 않는다.
+_REPEALED_TITLE_RE = re.compile(r"^\s*삭\s*제\b")
+
+
+def repealed_by_title(title: object) -> bool:
+    """조문제목만으로 삭제 조문임이 드러나는가.
+
+    본문이 비어 있어도 이 값이 참이면 조문을 버리지 않는다. 번호가 비어 있다는
+    사실 자체가 조회 대상이기 때문이다. 본문을 만들어 채우지는 않는다 — 소스가
+    주지 않은 내용을 생성하는 것은 금지다.
+    """
+    return bool(_REPEALED_TITLE_RE.match(str(title or "")))
+
+
+# 제목이 '삭제'이고 본문에 날짜 표기만 남은 형태. 전남대 실측 7조문:
+# 「법학전문대학원교학규정 제26조의2」 본문 '<2023. 5. 10.>' 등.
+# **본문 전체가 날짜 하나일 때만** 삭제일자로 읽는다. 본문 아무 데서나 날짜를
+# 주우면 개정 이력에 적힌 다른 날짜를 삭제일자로 둔갑시킨다.
+_DATE_ONLY_BODY_RE = re.compile(r"^\s*<?\s*\d{4}\s*\.\s*\d{1,2}\s*\.\s*\d{1,2}\s*\.?\s*>?\s*$")
+
+
+def _repeal_date_only_body(body: object) -> str | None:
+    """본문이 날짜 표기 하나뿐이면 그 날짜를, 아니면 None."""
+    text = str(body or "")
+    return _iso_date(text) if _DATE_ONLY_BODY_RE.match(text) else None
 
 
 # 문장 끝 물음표(정상)와 손상 물음표를 가른다. 손상은 낱말 안이나 줄머리에 나타난다.
@@ -439,6 +473,13 @@ class RuleSearchIndex:
                 current_by_key.get((base, str(row["조문번호"]))) if is_superseded else None
             )
             repealed, repealed_date = _repeal_info(row.get("본문", ""))
+            if not repealed and repealed_by_title(row.get("조문제목")):
+                # 삭제 표시가 제목에만 있는 소스. 날짜는 제목에서 먼저 읽고
+                # ('삭제 2009.12.7' → 2009-12-07), 없으면 본문을 본다.
+                repealed = True
+                repealed_date = _iso_date(str(row.get("조문제목") or ""))
+                if repealed_date is None:
+                    repealed_date = _repeal_date_only_body(row.get("본문"))
             row["is_repealed"] = repealed
             row["repealed_date"] = repealed_date
             row["text_integrity"] = text_integrity(row.get("본문", ""))
@@ -528,7 +569,7 @@ class RuleSearchIndex:
                 if str(article.get("record_type")) == "별표"
                 else MAX_ARTICLE_LENGTH
             )
-            if not body:
+            if not body and not repealed_by_title(article.get("조문제목")):
                 reason = "empty_body"
             elif len(body) > limit:
                 reason = "oversized_body"
