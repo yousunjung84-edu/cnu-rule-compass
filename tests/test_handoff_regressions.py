@@ -597,7 +597,22 @@ class V16GoldenCaseTest(unittest.TestCase):
     품질을 떨어뜨렸다. 그래서 여기서는 **응답 규모**까지 회귀 대상으로 잠근다.
     """
 
-    ATTACHMENT_QUERY = "계약 체결 수의계약 금액 기준"
+    # 별표가 상위를 차지해 '무엇이 빠졌는지' 안내 경로를 실제로 타는 질의.
+    #
+    # 원래는 '계약 체결 수의계약 금액 기준'이었는데, 그 질의는 **결함 시절의 동작을
+    # 박제한 것**이었다(2026-08-29). 당시 1단 라우팅이 「교직원 이해충돌 방지제도
+    # 운영지침」을 후보에서 떨어뜨려 본칙 결과가 0건이 되고, 그 자리를 연구비
+    # 중앙관리지침의 무관한 별표(용역계약서 서식·연구비 집행기준)가 채웠다.
+    # 라우팅을 고치자 제9조 「수의계약 체결 제한 대상 확인」이 1위로 올라오면서
+    # 별표는 그 아래로 내려갔고, F3 규칙상 반환 조문보다 아래인 별표는 보고 대상이
+    # 아니므로 이 질의로는 안내 경로를 더 이상 타지 않는다.
+    #
+    # 계약 자체는 유효하므로 질의만 바꿔 커버리지를 유지한다. 이 질의는 세 계약을
+    # 동시에 만족한다 — 별표 제외 3건 안내 · 반환 조문 본문 664자(잠식 없음) ·
+    # include_attachments=True 시 별표 4건이 200자로 절단.
+    ATTACHMENT_QUERY = "물품반출 신청서"
+    # 라우팅 수정으로 정답이 올라온 것을 함께 잠근다(test_14b).
+    ROUTING_LITERAL_QUERY = "계약 체결 수의계약 금액 기준"
     RESEARCH_FUND = "전남대학교 연구비 중앙관리지침"
     LIBRARY = "전남대학교 도서관 규정"
 
@@ -618,6 +633,37 @@ class V16GoldenCaseTest(unittest.TestCase):
         for row in result["attachments"]:
             self.assertTrue(row["record_id"])
             self.assertTrue(str(row["조문제목"]).strip(), "제외 별표는 제목으로 식별 가능해야 한다")
+
+    def test_14b_literal_field_match_routes_to_the_owning_rule(self) -> None:
+        """복합어 안에 든 개념어로 물어도 그 규정이 후보에서 빠지지 않아야 한다.
+
+        '수의계약'은 「교직원 이해충돌 방지제도 운영지침」의 조문제목
+        '수의계약 체결 제한 대상 확인' 안에 리터럴로 있지만, 토크나이저가 한글
+        복합어를 쪼개지 않아 완전형 토큰으로는 존재하지 않는다. 라우팅이 완전형만
+        인정하던 시절에는 이 규정이 후보에서 탈락하고 무관한 연구비 별표가 응답을
+        채웠다.
+        """
+        result = search_rule(self.ROUTING_LITERAL_QUERY, k=8)
+        names = [row["규정명"] for row in result["results"]]
+        self.assertIn("전남대학교 교직원 이해충돌 방지제도 운영지침", names)
+
+    def test_14c_compound_concept_is_not_declared_missing(self) -> None:
+        """있는 규정을 '없다'고 답하는 것이 잘못된 순위보다 나쁘다.
+
+        실측(수정 전): 의미 단위 개념어 173개 중 66개가 실재 현행 규정을 두고
+        not_found를 냈다. '연구실안전'은 「연구실안전관리 규정」이 현행 57조문을
+        갖고 있는데도 '해당 개념을 다루는 규정이 수집 범위에 없을 수 있습니다'로
+        답했다.
+        """
+        for query, owner in (
+            ("연구실안전", "전남대학교 연구실안전관리 규정"),
+            ("동물실험윤리", "전남대학교 동물실험윤리위원회의 설치.운영에 관한 규정"),
+            ("보건진료", "전남대학교 보건진료소규정"),
+        ):
+            with self.subTest(query=query):
+                result = search_rule(query, k=3)
+                self.assertEqual("ok", result.get("status"), f"{query!r}가 not_found를 냈다")
+                self.assertIn(owner, [row["규정명"] for row in result["results"]])
 
     def test_13_attachment_body_truncated_when_included(self) -> None:
         result = search_rule(self.ATTACHMENT_QUERY, k=8, include_attachments=True)

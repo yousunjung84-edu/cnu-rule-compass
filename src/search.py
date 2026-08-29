@@ -119,6 +119,38 @@ def _query_words(text: str) -> list[str]:
     ))
 
 
+# 필드 내부 리터럴을 개념 일치로 인정하는 최소 길이 (2026-08-29, Codex 검수 반영).
+#
+# 토크나이저가 한글 복합어를 쪼개지 않아 「연구실안전관리」·「연구윤리진실성위원회」가
+# 통째로 한 토큰이 된다. 그래서 '연구실안전'·'연구윤리'는 그 규정의 완전형 토큰이
+# 아니고, 라우팅(core_hit)과 2단 게이트(matched_core)가 둘 다 정답 규정을 떨어뜨린다.
+# 실측(수정 전): '연구실안전 위반' → 「교직원 행동강령」 제22조(30.1) / 라우팅 제한을
+# 없애면 「연구실안전관리 규정」 제13조가 160.5로 1위. '연구실안전' 단독은 아예
+# not_found였다 — 그 규정이 현행 57조문을 갖고 있는데도. 이런 허위 not_found가
+# 의미 단위 개념어 173개 중 66개였다.
+#
+# 길이 4를 밑돌면 '연구'·'안전' 같은 두 음절 조각이 아무 규정명에나 걸려 라우팅의
+# 변별력이 사라진다. 본문에는 적용하지 않는다 — 방대한 본문에 우연히 걸리면
+# 관련성 게이트가 무력해진다(2·3-gram을 게이트에서 뺀 것과 같은 이유).
+FIELD_LITERAL_MIN_LENGTH = 4
+
+
+def _field_literal(article: dict) -> str:
+    """규정명·편제·조문제목을 공백 없이 이어 붙인 리터럴 대조용 문자열."""
+    joined = "".join(
+        str(article.get(field) or "") for field in ("규정명", "편제", "조문제목")
+    )
+    return re.sub(r"\s+", "", joined).lower()
+
+
+def _literal_core_words(query: str) -> list[str]:
+    """필드 리터럴 대조 대상이 되는 질의어 — 길이 4 이상의 비일반어."""
+    return [
+        word for word in _query_words(query)
+        if len(word) >= FIELD_LITERAL_MIN_LENGTH and word not in _GENERIC_TERMS
+    ]
+
+
 def validate_source_url(source_url: object, source_key: object) -> bool:
     """공식 HTTPS 호스트이고 URL의 key가 레코드 source_key와 같은지 확인한다."""
     try:
@@ -542,6 +574,12 @@ class RuleSearchIndex:
         # 본문 우연 매칭으로 엉뚱한 규정의 조문이 상위에 오는 오매칭이 줄어든다.
         self._rule_docs: dict[str, set[int]] = defaultdict(set)
         self._rule_profiles: dict[str, Counter[str]] = defaultdict(Counter)
+        # 토큰이 아니라 **원문 문자열**도 함께 들고 있는다. 토크나이저는 한글
+        # 복합어를 쪼개지 않아 「연구실안전관리」가 통째로 한 토큰이 되고, 그래서
+        # '연구실안전'은 그 규정의 완전형 토큰이 아니다. 토큰만 보면 정답 규정이
+        # 후보에서 빠진다(FIELD_LITERAL_MIN_LENGTH 주석 참고).
+        self._rule_field_text: dict[str, str] = defaultdict(str)
+        self._doc_field_text: list[str] = []
         for doc_id, article in enumerate(self.articles):
             name = str(article.get("규정명", ""))
             self._rule_docs[name].add(doc_id)
@@ -552,6 +590,10 @@ class RuleSearchIndex:
                 profile[term] += 1
             for term in tokenize(article.get("조문제목", "")):
                 profile[term] += 2
+            fragment = _field_literal(article)
+            self._doc_field_text.append(fragment)
+            if fragment not in self._rule_field_text[name]:
+                self._rule_field_text[name] += fragment
 
     def _idf(self, term: str) -> float:
         count = self._document_frequencies.get(term, 0)
@@ -590,11 +632,34 @@ class RuleSearchIndex:
             if core_hit and score > 0:
                 scored.append((score, name))
         scored.sort(key=lambda row: (-row[0], row[1]))
+
+        # 완전형 토큰으로는 못 잡지만 **필드 문자열 안에 그대로 들어 있는** 규정을
+        # 후보에 강제로 넣는다('연구실안전' ⊂ '연구실안전관리'). 이것이 없으면
+        # 정답 규정이 라우팅에서 탈락하고, 주변어('위반')로 좁혀진 엉뚱한 규정이
+        # 결과를 채워 **전체 검색 폴백까지 영구 차단**한다 — 호출부는 제한 검색이
+        # 비었을 때만 폴백하는데, 그 엉뚱한 규정이 일반어 하나로 2단 게이트를
+        # 통과해 결과를 비우지 않기 때문이다(2026-08-29 Codex 검수).
+        literal_words = _literal_core_words(query)
+        forced = {
+            name for name in self._rule_profiles
+            if literal_words
+            and any(word in self._rule_field_text.get(name, "") for word in literal_words)
+        }
+        if not scored and not forced:
+            return []
         if len(scored) <= top_r:
-            return [name for _, name in scored]
-        cutoff = scored[top_r - 1][0]
-        tied = [name for score, name in scored if score >= cutoff]
-        return [] if len(tied) > ROUTE_TIE_LIMIT else tied
+            names = [name for _, name in scored]
+        else:
+            cutoff = scored[top_r - 1][0]
+            tied = [name for score, name in scored if score >= cutoff]
+            if len(tied) > ROUTE_TIE_LIMIT:
+                return []
+            names = tied
+        # 강제 후보는 top_r 절단 **밖에서** 합집합한다. 다시 자르면 점수가 같은데도
+        # 사전순으로 밀려 배제되던 과거 사고(재입학 질의의 학칙 제30조)가 재발한다.
+        merged = names + [name for name in sorted(forced) if name not in names]
+        # 합집합이 변별력을 잃을 만큼 커지면 라우팅을 포기하고 전체 검색으로 넘긴다.
+        return [] if len(merged) > ROUTE_TIE_LIMIT else merged
 
     def _version_filter(
         self,
@@ -756,11 +821,19 @@ class RuleSearchIndex:
             matched_concepts = 0
             matched_core = 0
             core_words = 0
+            field_literal = self._doc_field_text[doc_id]
             for word in query_words:
                 forms = {form for form in _word_forms(word) if not form.startswith("#")}
                 is_core = not (forms & _GENERIC_TERMS)
                 core_words += is_core
-                if any(frequencies.get(form) for form in forms):
+                matched = any(frequencies.get(form) for form in forms)
+                if not matched and is_core and len(word) >= FIELD_LITERAL_MIN_LENGTH:
+                    # 완전형 토큰은 아니지만 규정명·편제·조문제목 안에 그대로 있다
+                    # ('연구실안전' ⊂ '연구실안전관리'). 라우팅만 고치면 '연구실안전'
+                    # 단독 질의는 여전히 not_found다 — 게이트가 gram을 개념으로
+                    # 세지 않아 matched_core=0이 되기 때문이다. 본문은 보지 않는다.
+                    matched = word in field_literal
+                if matched:
                     matched_concepts += 1
                     matched_core += is_core
             # 비율의 분모는 **핵심어만** 센다. 일반 행정어를 분모에 넣으면 자연어 질의가
