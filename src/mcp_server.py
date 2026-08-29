@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import sys
@@ -19,7 +20,7 @@ try:
     SERVER_VERSION = metadata.version("cnu-rule-compass")
 except metadata.PackageNotFoundError:
     # 미설치(PYTHONPATH 직접 실행) 환경 폴백 — pyproject.toml [project].version과 동기.
-    SERVER_VERSION = "1.9.6"
+    SERVER_VERSION = "1.9.7"
 
 TOOL_NAMES = (
     "search_rule",
@@ -569,6 +570,25 @@ def get_related_articles(
     }
 
 
+def _with_institution(fn):
+    """도구 응답 최상위에 기관명을 붙인다.
+
+    여러 대학의 나침반을 한 클라이언트에 동시에 붙이면 어느 대학 조문인지
+    응답 안에 단서가 없다. 규정명이 대학명을 달고 있는 경우가 많지만 전량은
+    아니다 — 전남대 804규정 중 165건(20.5%)이 무접두다(「대학 내 개인형
+    이동장치 안전관리 규정」 등). 필드 추가만 하고 기존 키는 건드리지 않는다.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        result = fn(*args, **kwargs)
+        if isinstance(result, dict) and "기관" not in result:
+            return {"기관": active_profile().univ_name, **result}
+        return result
+
+    return wrapper
+
+
 def create_server(**settings):
     """FastMCP 서버를 만들며, 패키지가 없으면 설치 안내 오류를 낸다.
 
@@ -586,13 +606,13 @@ def create_server(**settings):
     # FastMCP는 version 인자를 받지 않아(SDK 1.28 기준) serverInfo.version이
     # SDK 버전으로 보고된다 — 하위 서버에 프로젝트 버전을 직접 지정한다.
     server._mcp_server.version = SERVER_VERSION
-    server.tool(name="search_rule")(search_rule)
-    server.tool(name="get_article")(get_article)
-    server.tool(name="get_article_as_of")(get_article_as_of)
-    server.tool(name="get_related_articles")(get_related_articles)
-    server.tool(name="list_rules")(list_rules)
-    server.tool(name="list_articles")(list_articles)
-    server.tool(name="get_corpus_stats")(get_corpus_stats)
+    server.tool(name="search_rule")(_with_institution(search_rule))
+    server.tool(name="get_article")(_with_institution(get_article))
+    server.tool(name="get_article_as_of")(_with_institution(get_article_as_of))
+    server.tool(name="get_related_articles")(_with_institution(get_related_articles))
+    server.tool(name="list_rules")(_with_institution(list_rules))
+    server.tool(name="list_articles")(_with_institution(list_articles))
+    server.tool(name="get_corpus_stats")(_with_institution(get_corpus_stats))
     return server
 
 
