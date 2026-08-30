@@ -105,6 +105,11 @@ def reconcile_names() -> dict:
 
 
 def main() -> int:
+    import argparse
+    ap = argparse.ArgumentParser(description="코퍼스 월간 갱신")
+    ap.add_argument("--approve", metavar="FINGERPRINT", default=None,
+                    help="pending change-set의 fingerprint를 승인 (change_gate)")
+    cli = ap.parse_args()
     started = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     log("=== 코퍼스 갱신 시작 ===")
     before = corpus_summary()
@@ -136,6 +141,32 @@ def main() -> int:
         if gate.returncode != 0:
             raise RuntimeError(f"테스트 게이트 실패: {tail}")
         log(f"[게이트] {tail}")
+
+        # change-set 승인 게이트 (backport #4, 코어 P1 이식 — 2026-08-31).
+        # 테스트는 코퍼스의 형식을 보고, 이 게이트는 **이전 대비 변경**을 본다.
+        # 규정 단위 소실이 있으면 지문 일치 승인 없이 채택하지 않는다.
+        # (운영본 코퍼스에는 is_current가 없어 승격 검사는 미래 대비다 —
+        # 현행성은 src/search.py가 런타임에 계산한다. 주 방어는 소실 게이트다.)
+        import change_gate
+        prev_rows = json.loads(backup.read_text(encoding="utf-8"))
+        new_rows = json.loads(CORPUS.read_text(encoding="utf-8"))
+        ok, change = change_gate.guard(prev_rows, new_rows, approve=cli.approve)
+        report["change_gate"] = {k: change[k] for k in
+                                 ("requires_approval", "fingerprint")}
+        if change["requires_approval"]:
+            (ROOT / "data" / "pending_change_report.json").write_text(
+                json.dumps(change, ensure_ascii=False, indent=2), encoding="utf-8")
+        if not ok:
+            candidate = CORPUS.with_suffix(".json.candidate")
+            shutil.copy2(CORPUS, candidate)
+            raise RuntimeError(
+                f"change-set 승인 필요 (fingerprint {change['fingerprint']}, "
+                f"위험 {len(change['risks'])}건) — 후보는 {candidate.name}에 보존, "
+                f"검토 후 --approve {change['fingerprint']} 로 재실행")
+        if change["requires_approval"]:
+            log(f"[change-gate] 승인 확인 {change['fingerprint']} — 위험 {len(change['risks'])}건 채택")
+        else:
+            log("[change-gate] 위험 변경 없음")
 
     except Exception as exc:
         # 어느 단계든 실패하면 코퍼스를 통째로 되돌린다 — 반쯤 갱신된 코퍼스로
