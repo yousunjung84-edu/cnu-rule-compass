@@ -283,7 +283,31 @@ def clean_markdown_text(value: str) -> str:
     return value.strip()
 
 
+# 순수 별지·붙임 표식. 대괄호 단독 줄과 공문 꼬리 「붙임: … 1부. 끝.」 두 형태다.
+# (rule-compass-core `2403b07`·`a41399e`의 attachment_cut 개념 이식, backport #2)
+_ATTACHMENT_MARK = re.compile(r"(?m)^\[\s*(?:별지|붙임)[^\]]*\]\s*$|^붙임\s*[::]")
+
+
+def attachment_cut(markdown: str) -> int:
+    """본문이 끝나는 오프셋. 별지·붙임 뒤의 조문은 규정의 조문이 아니다.
+
+    2026-08-31 실측: 「연구조교 및 교육조교 선발과 운영에 관한 지침」 5개 판본에서
+    별지 서식의 **복무협약서 제1~8조가 본칙으로 적재**돼 있었다(합계 109조문,
+    제2조·제8조는 판본당 3~4회 중복). 서식 견본의 조문을 규정으로 인용하면
+    소스가 주지 않은 규범적 지위를 부여하는 것이다.
+
+    문서 **첫머리**의 표식은 경계가 아니다 — 그 문서 자신이 다른 문서의 붙임으로
+    배포됐다는 표지다(코어에서 충남대 「계약심의회 운영 지침」으로 확인).
+    앞에 조문이 하나도 없으면 자르지 않는다.
+    """
+    for match in _ATTACHMENT_MARK.finditer(markdown):
+        if ARTICLE_RE.search(markdown[:match.start()]):
+            return match.start()
+    return len(markdown)
+
+
 def split_articles(markdown: str) -> list[dict[str, str]]:
+    markdown = markdown[:attachment_cut(markdown)]
     matches = list(ARTICLE_RE.finditer(markdown))
     articles: list[dict[str, str]] = []
     for index, match in enumerate(matches):
