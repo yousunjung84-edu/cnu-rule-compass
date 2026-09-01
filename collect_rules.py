@@ -278,7 +278,20 @@ def run_kordoc(hwp_path: Path, md_path: Path, timeout: int = 120) -> str:
     return md_path.read_text(encoding="utf-8", errors="replace")
 
 
+# kordoc 4.12.0이 새로 넣는 밑줄 표기. **태그만 벗기고 텍스트는 남긴다.**
+#
+# 2026-09-01 실측: 기존 코퍼스 17,585건에 <u>가 0건인데 4.12.0은 이를 넣는다.
+# 그대로 두면 신규 수집분만 표기 세대가 달라지고, 전건 재수집하면 밑줄이 있는
+# 조문의 본문이 바뀌어 record_id가 재발급된다(ID는 본문 해시다).
+#
+# 밑줄은 **서식이지 조문 내용이 아니다** — 인용에 필요 없다. 반면 표 구조를
+# 나르는 <table>·<tr>·<td>·<th>·<br>은 그대로 둔다(코퍼스에 이미 1,269건).
+# 지우는 것은 의미를 나르지 않는 태그 하나뿐이다.
+_UNDERLINE_TAG = re.compile(r"</?u>", re.IGNORECASE)
+
+
 def clean_markdown_text(value: str) -> str:
+    value = _UNDERLINE_TAG.sub("", value)
     value = re.sub(r"(?m)^#{1,6}\s*", "", value)
     value = value.replace("\r\n", "\n").replace("\r", "\n")
     value = re.sub(r"[ \t]+\n", "\n", value)
