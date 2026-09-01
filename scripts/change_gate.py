@@ -71,12 +71,47 @@ def _blockers(prev_rows: list[dict], new_rows: list[dict],
     out: list[dict] = []
     for label, rows, cur in (("prev", prev_rows, prev_current),
                              ("new", new_rows, new_current)):
+        # 맵이 dict가 아니면 아래 검사가 예외로 터진다. 구조화된 차단으로 돌려
+        # 보고서에 남긴다 — 배포는 원복되겠지만 사유가 남지 않으면 진단이 안 된다.
+        if cur is not None and not isinstance(cur, dict):
+            out.append({"type": "current_map_type", "side": label,
+                        "detail": f"현행 맵이 dict가 아닙니다({type(cur).__name__})."})
+            continue
         if cur is None:
             out.append({"type": "current_map_missing", "side": label,
                         "detail": "현행 맵이 전달되지 않았습니다. 호출자가 엔진으로 "
                                   "record_id→is_current 맵을 만들어 넘겨야 합니다."})
             continue
-        ids = {str(r.get("record_id")) for r in rows if r.get("record_id")}
+        # ★ record_id가 없거나 빈 행은 그냥 건너뛰면 안 된다(4회차 교차검증).
+        # 건너뛰면 그 행의 현행성은 아무도 판정하지 않은 채 통과한다.
+        no_id = sum(1 for r in rows if not str(r.get("record_id") or "").strip())
+        if no_id:
+            out.append({"type": "record_id_missing", "side": label,
+                        "count": no_id, "total": len(rows),
+                        "detail": "record_id 없는 행이 있어 현행성을 판정할 수 "
+                                  "없습니다."})
+        # 중복 ID 자체는 차단하지 않는다. record_id가 내용 해시
+        # (source_key|조문번호|record_type|조문제목|본문)이므로 같은 ID는 같은
+        # 내용이고, 한 bool이 대표해도 판정이 모호하지 않다. 실측(2026-09-01):
+        # 52종 77 초과행, **행 간 필드 불일치 0** — 적재 게이트가 duplicate_record
+        # 77건으로 거르는 그 행들이다. 여기서 차단하면 매 실행이 막힌다.
+        #
+        # 차단할 것은 **내용이 다른 중복**이다. 그때는 어느 쪽 현행성인지
+        # 정할 수 없고, ID 산식이 깨졌다는 신호이기도 하다.
+        groups: dict[str, list[dict]] = {}
+        for r in rows:
+            rid = str(r.get("record_id") or "").strip()
+            if rid:
+                groups.setdefault(rid, []).append(r)
+        conflict = sorted(
+            rid for rid, rs in groups.items() if len(rs) > 1
+            and any(other != rs[0] for other in rs[1:]))
+        if conflict:
+            out.append({"type": "record_id_conflict", "side": label,
+                        "count": len(conflict), "sample": conflict[:5],
+                        "detail": "같은 record_id인데 내용이 다른 행이 있습니다 — "
+                                  "어느 쪽 현행성인지 정할 수 없습니다."})
+        ids = set(groups)
         missing = ids - set(cur)
         if missing:
             out.append({"type": "current_map_incomplete", "side": label,
@@ -85,11 +120,24 @@ def _blockers(prev_rows: list[dict], new_rows: list[dict],
                         "detail": "현행 맵이 일부 record_id를 덮지 않습니다. "
                                   "빈 맵이나 부분 맵으로는 현행 검사가 성립하지 "
                                   "않습니다."})
+        # rows에 없는 여분 키는 맵이 다른 코퍼스에서 왔다는 신호다.
+        extra = set(cur) - ids
+        if extra:
+            out.append({"type": "current_map_extra", "side": label,
+                        "count": len(extra), "sample": sorted(extra)[:5],
+                        "detail": "현행 맵에 이 코퍼스에 없는 record_id가 있습니다 "
+                                  "— 다른 코퍼스의 맵일 수 있습니다."})
         bad = [k for k, v in cur.items() if not isinstance(v, bool)]
         if bad:
-            out.append({"type": "current_map_type", "side": label,
+            out.append({"type": "current_map_value_type", "side": label,
                         "count": len(bad), "sample": sorted(map(str, bad))[:5],
                         "detail": "현행 맵의 값은 참/거짓이어야 합니다."})
+    # 빈 코퍼스는 비교의 대상이 아니다. 양쪽이 비면 「변경 없음」으로 통과하고,
+    # 한쪽만 비면 전멸이 fingerprint 승인 대상이 된다 — 둘 다 판정 불능이다.
+    if not prev_rows or not new_rows:
+        out.append({"type": "empty_corpus",
+                    "prev": len(prev_rows), "new": len(new_rows),
+                    "detail": "코퍼스가 비어 있어 변경 판정이 성립하지 않습니다."})
     return out
 
 
@@ -120,17 +168,38 @@ def change_report(prev_rows: list[dict], new_rows: list[dict],
       current_zero — 현행이 0건이 됐다. 신판 미수집이 거의 확실한 사고.
       current_drop — 줄었지만 남아 있다. 조문 통합일 수 있으니 확인 대상.
     """
+    # ★ 차단부터 판정한다. 위험 계산은 맵이 정상일 때만 의미가 있고, 비정상
+    # 입력(맵이 list 등)에서는 예외로 터져 구조화된 보고서조차 못 남긴다.
+    blockers = _blockers(prev_rows, new_rows, prev_current, new_current)
+    current_source = ("engine" if (prev_current is not None and new_current is not None)
+                      else "row_field")
+    if blockers:
+        return {
+            "blocked": True, "blockers": blockers,
+            "requires_approval": False, "fingerprint": None, "risks": [],
+            "new_rules": [], "renames": [],
+            "current_source": current_source,
+            "fingerprint_version": FINGERPRINT_VERSION,
+            "distribution": {},
+        }
     pc, nc = _per_rule(prev_rows), _per_rule(new_rows)
     names = {**_names(new_rows), **_names(prev_rows)}
-    losses = [{"source_key": k, "규정명": names.get(k, ""),
-               "before": pc[k], "after": nc.get(k, 0)}
-              for k in sorted(pc) if nc.get(k, 0) < pc[k]]
     prev_cur = (prev_current if prev_current is not None else
                 {str(r.get("record_id")): bool(r.get("is_current"))
                  for r in prev_rows if r.get("record_id")})
     new_cur = (new_current if new_current is not None else
                {str(r.get("record_id")): bool(r.get("is_current"))
                 for r in new_rows if r.get("record_id")})
+    new_ids = {str(r.get("record_id")) for r in new_rows if r.get("record_id")}
+    lost_by_key: dict[str, list[str]] = {}
+    for r in prev_rows:
+        rid = str(r.get("record_id", ""))
+        if rid and rid not in new_ids:
+            lost_by_key.setdefault(str(r.get("source_key")), []).append(rid)
+    losses = [{"source_key": k, "규정명": names.get(k, ""),
+               "before": pc[k], "after": nc.get(k, 0),
+               "lost_ids": sorted(lost_by_key.get(k, []))}
+              for k in sorted(pc) if nc.get(k, 0) < pc[k]]
     promotions = [{"record_id": rid, "규정명": str(r.get("규정명", "")),
                    "조문번호": str(r.get("조문번호", ""))}
                   for r in new_rows
@@ -138,32 +207,29 @@ def change_report(prev_rows: list[dict], new_rows: list[dict],
                   and prev_cur.get(rid) is False and new_cur.get(rid, False)]
     pcc, ncc = (_current_per_rule(prev_rows, prev_current),
                 _current_per_rule(new_rows, new_current))
+    # ★ 위험 항목은 **무엇이 바뀌었는지**까지 담아야 지문이 내용에 결속된다
+    # (4회차 교차검증). before/after 수치만 담으면 같은 규정 안의 서로 다른
+    # 강등이 같은 지문을 만들고, 한 번 받은 승인이 다른 변경에 재사용된다.
+    # 실측: 조문 a 강등과 조문 b 강등이 둘 다 5dc4823b740b였다.
+    demoted_by_key: dict[str, list[str]] = {}
+    for r in prev_rows:
+        rid = str(r.get("record_id", ""))
+        if rid and prev_cur.get(rid) and not new_cur.get(rid, False):
+            demoted_by_key.setdefault(str(r.get("source_key")), []).append(rid)
     current_losses = [{"source_key": k, "규정명": names.get(k, ""),
                        "before": pcc[k], "after": ncc.get(k, 0),
                        "severity": "current_zero" if ncc.get(k, 0) == 0
-                                   else "current_drop"}
+                                   else "current_drop",
+                       "demoted_ids": sorted(demoted_by_key.get(k, []))}
                       for k in sorted(pcc) if ncc.get(k, 0) < pcc[k]]
     # 개명은 위험이 아니라 참고 변화 — 다만 보고서에는 반드시 남긴다.
     prev_names, new_names = _names(prev_rows), _names(new_rows)
     renames = [{"source_key": k, "before": prev_names[k], "after": new_names[k]}
                for k in sorted(set(prev_names) & set(new_names))
                if prev_names[k] != new_names[k]]
-    current_source = ("engine" if (prev_current is not None and new_current is not None)
-                      else "row_field")
     risks = ([{"type": "article_loss", **l} for l in losses]
              + [{"type": "current_article_loss", **l} for l in current_losses]
              + [{"type": "current_promotion", **p} for p in promotions])
-    # ★ 검증 불능은 **승인 대상이 아니라 차단 대상**이다(3회차 교차검증).
-    #
-    # 처음에는 맵이 없으면 current_source_missing을 위험 목록에 넣었다. 그런데
-    # 그 위험은 고정 문자열 하나라 **서로 다른 변경이 같은 지문**을 만든다 —
-    # 한 번 받은 승인이 다음 변경에도 통하는 우회 토큰이 됐다(재현 확인).
-    # 지문 결속의 요점은 「내용이 바뀌면 승인이 무효」인데 그 성질이 없는 항목을
-    # 위험에 넣은 것이 잘못이었다.
-    #
-    # 그리고 맵의 **존재만** 봤다. 빈 맵({})을 넘기면 engine으로 인정돼 현행
-    # 검사가 그대로 꺼진 채 통과했다. 이제 완전성까지 본다.
-    blockers = _blockers(prev_rows, new_rows, prev_current, new_current)
     # 지문은 **순서에 흔들리지 않아야** 한다(3회차 교차검증). promotions가
     # new_rows 순서를 그대로 담아, 같은 두 승격의 행 순서만 뒤집혀도 지문이
     # 달라졌다 — 재실행 드리프트와 실제 변경을 구별할 수 없게 만든다.

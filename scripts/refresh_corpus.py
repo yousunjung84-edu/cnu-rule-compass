@@ -58,6 +58,36 @@ def corpus_summary() -> dict:
     return {"조문": len(rows), "규정": len({r["규정명"] for r in rows})}
 
 
+def build_current_map(path, raw: list[dict]) -> dict:
+    """record_id → 현행 여부. **원본 행 전체**를 덮는다.
+
+    엔진 적재분만 담으면 적재 게이트가 걸러낸 레코드(빈 본문·중복·초과)가
+    맵에서 빠져 change_gate가 「맵 불완전」으로 차단한다 — 17,585행 대비
+    221건이 비어 매 실행이 막힌다(2026-09-01 실측). 적재되지 않은 레코드는
+    검색에 잡히지 않으므로 현행일 수 없다: False로 덮는다.
+
+    ⚠️ 이 규칙은 **법적 현행성과 적재 가능성을 한 값에 합친다**(4회차 교차검증).
+    같은 ID가 적재→미적재로 바뀌면 current_article_loss, 그 반대면
+    current_promotion이 된다 — 빈 본문·크기·중복 판정이 바뀐 것만으로도
+    법적 현행성 변화처럼 승인을 요구한다. 그래도 이 방향을 택한다: 적재되지
+    않은 조문은 소비자에게 없는 것과 같으므로, 그 변화를 사람이 한 번 보는
+    편이 조용히 지나가는 것보다 안전하다. 보고서의 severity로 구별한다.
+
+    ★ 모듈 레벨에 둔다. 중첩 함수로 두면 테스트가 호출할 수 없어, 배선이
+    깨져도 테스트가 통과했다(4회차 교차검증: 반환을 적재분으로 되돌려도
+    배선 테스트 3건이 전부 통과).
+    """
+    from src.search import RuleSearchIndex
+
+    idx = RuleSearchIndex(path)
+    rows = idx.articles
+    rows = list(rows.values()) if isinstance(rows, dict) else list(rows)
+    loaded = {str(r.get("record_id")): bool(r.get("is_current", True))
+              for r in rows if r.get("record_id")}
+    return {str(r.get("record_id")): loaded.get(str(r.get("record_id")), False)
+            for r in raw if r.get("record_id")}
+
+
 def reconcile_names() -> dict:
     """게시 목록 기준으로 코퍼스 규정명을 대사한다 (현행 중복 방지의 핵심).
 
@@ -151,30 +181,13 @@ def main() -> int:
         # 현행 관련 위험 검사가 전부 꺼진 채로 통과한다(2026-09-01 실측:
         # 62행이 개정전으로 강등됐는데 위험 0건으로 통과).
         import change_gate
-        from src.search import RuleSearchIndex  # noqa: E402
-
-        def current_map(path, raw: list[dict]) -> dict:
-            """record_id → 현행 여부. **원본 행 전체**를 덮는다.
-
-            엔진 적재분만 담으면 적재 게이트가 걸러낸 레코드(빈 본문·중복·
-            초과)가 맵에서 빠져 change_gate가 「맵 불완전」으로 차단한다 —
-            17,585행 대비 221건이 비어 매 실행이 막힌다(실측). 적재되지 않은
-            레코드는 검색에 잡히지 않으므로 현행일 수 없다: False로 덮는다.
-            """
-            idx = RuleSearchIndex(path)
-            rows = idx.articles
-            rows = list(rows.values()) if isinstance(rows, dict) else list(rows)
-            loaded = {str(r.get("record_id")): bool(r.get("is_current", True))
-                      for r in rows if r.get("record_id")}
-            return {str(r.get("record_id")): loaded.get(str(r.get("record_id")), False)
-                    for r in raw if r.get("record_id")}
 
         prev_rows = json.loads(backup.read_text(encoding="utf-8"))
         new_rows = json.loads(CORPUS.read_text(encoding="utf-8"))
         ok, change = change_gate.guard(
             prev_rows, new_rows, approve=cli.approve,
-            prev_current=current_map(backup, prev_rows),
-            new_current=current_map(CORPUS, new_rows))
+            prev_current=build_current_map(backup, prev_rows),
+            new_current=build_current_map(CORPUS, new_rows))
         report["change_gate"] = {k: change[k] for k in
                                  ("requires_approval", "fingerprint",
                                   "current_source", "blocked",

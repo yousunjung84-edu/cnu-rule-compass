@@ -81,6 +81,41 @@ class ChangeGateCurrentTest(unittest.TestCase):
                 self.assertTrue(report["blocked"])
                 self.assertIsNone(report["fingerprint"])
 
+    def test_판정_불능_경계는_모두_차단된다(self):
+        """무ID·중복ID·여분키·비-dict 맵·빈 코퍼스 — 4회차 교차검증.
+
+        전부 「무엇이 변했는지 판정할 수 없는」 상태다. 건너뛰거나 예외로
+        끝내면 그 행의 현행성은 아무도 판정하지 않은 채 지나간다.
+        """
+        a = _row("a")
+        cases = {
+            "record_id_missing": ([a, {"source_key": "K", "규정명": "R",
+                                       "조문번호": "제2조"}], {"a": True}),
+            # 같은 ID·다른 내용 — 어느 쪽 현행성인지 정할 수 없다.
+            # (내용까지 같은 중복은 정상이다: record_id가 내용 해시라 실 코퍼스에
+            #  52종 77행 존재하며 필드 불일치 0. 차단하면 매 실행이 막힌다.)
+            "record_id_conflict": ([a, _row("a", art="제2조")], {"a": True}),
+            "current_map_extra": ([a], {"a": True, "ghost": False}),
+            "current_map_type": ([a], ["a"]),
+            "empty_corpus": ([], {}),
+        }
+        for expected, (rows, cur) in cases.items():
+            with self.subTest(expected):
+                ok, report = change_gate.guard(rows, rows, prev_current=cur,
+                                               new_current=cur)
+                self.assertFalse(ok)
+                self.assertTrue(report["blocked"])
+                self.assertIsNone(report["fingerprint"])
+                self.assertIn(expected, {b["type"] for b in report["blockers"]})
+
+    def test_내용이_같은_중복ID는_차단하지_않는다(self):
+        """실 코퍼스에 52종 77행 존재한다 — 차단하면 매 실행이 막힌다."""
+        rows = [_row("a"), _row("a")]
+        ok, report = change_gate.guard(rows, rows, prev_current={"a": True},
+                                       new_current={"a": True})
+        self.assertTrue(ok)
+        self.assertFalse(report["blocked"])
+
     def test_차단_상태는_어떤_승인으로도_통과하지_못한다(self):
         prev = [_row("a")]
         new = [_row("a", name="R (2026. 8. 19. 개정전)")]
@@ -89,16 +124,45 @@ class ChangeGateCurrentTest(unittest.TestCase):
                 self.assertFalse(change_gate.guard(prev, new, approve=approve)[0])
 
     def test_지문은_행_순서에_흔들리지_않는다(self):
-        """promotions가 new_rows 순서를 그대로 담아 순서만 뒤집혀도 지문이 변했다."""
+        """★ promotions **두 건 이상**을 만들어야 이 회귀가 고정된다 — 4회차.
+
+        처음 이 테스트는 모두 True→False로 두어 생성되는 위험이 이미 정렬된
+        current_article_loss 한 건뿐이었다. canonical sorted()를 제거해도
+        통과했다 — 고친 회귀를 고정하지 못한 테스트였다. promotions는
+        new_rows 순서를 그대로 담으므로 두 건을 서로 다른 순서로 넣어야
+        정렬 제거가 드러난다.
+        """
         prev = [_row("a"), _row("b", art="제2조")]
-        new = [_row("a", name="R (2026. 8. 19. 개정전)"),
-               _row("b", name="R (2026. 8. 19. 개정전)", art="제2조")]
-        maps = {"prev_current": {"a": True, "b": True},
-                "new_current": {"a": False, "b": False}}
-        first = change_gate.change_report(prev, new, **maps)["fingerprint"]
-        second = change_gate.change_report(prev, list(reversed(new)), **maps)["fingerprint"]
-        self.assertIsNotNone(first)
-        self.assertEqual(first, second)
+        new = [_row("a"), _row("b", art="제2조")]
+        maps = {"prev_current": {"a": False, "b": False},
+                "new_current": {"a": True, "b": True}}
+        first = change_gate.change_report(prev, new, **maps)
+        second = change_gate.change_report(prev, list(reversed(new)), **maps)
+        promos = [r for r in first["risks"] if r["type"] == "current_promotion"]
+        self.assertEqual(len(promos), 2, "순서 의존을 드러내려면 승격이 2건 이상이어야 한다")
+        # 순서를 뒤집으면 risks 배열의 원소 순서가 실제로 달라진다.
+        self.assertNotEqual([r["record_id"] for r in first["risks"]],
+                            [r["record_id"] for r in second["risks"]])
+        self.assertIsNotNone(first["fingerprint"])
+        self.assertEqual(first["fingerprint"], second["fingerprint"])
+
+    def test_지문은_내용에_결속된다(self):
+        """서로 다른 change-set은 서로 다른 지문을 가져야 한다 — 4회차.
+
+        기존 승인 테스트는 「보고서가 준 지문으로 승인된다」만 봐서, 모든
+        change-set에 같은 고정 지문을 발급하도록 망가뜨려도 통과했다.
+        """
+        prev = [_row("a"), _row("b", art="제2조")]
+        maps = {"prev_current": {"a": True, "b": True}}
+        one = change_gate.change_report(
+            prev, [_row("a", name="R (2026. 8. 19. 개정전)"), _row("b", art="제2조")],
+            new_current={"a": False, "b": True}, **maps)["fingerprint"]
+        two = change_gate.change_report(
+            prev, [_row("a"), _row("b", name="R2 (2026. 8. 19. 개정전)", art="제2조")],
+            new_current={"a": True, "b": False}, **maps)["fingerprint"]
+        self.assertIsNotNone(one)
+        self.assertIsNotNone(two)
+        self.assertNotEqual(one, two, "다른 변경인데 같은 지문 — 승인이 재사용된다")
 
     def test_조문_통합은_current_drop으로_구분된다(self):
         """구판 2조문을 신판 1개 통합 조문이 대체하는 정상 개정 — 교차검증 #6.
@@ -145,20 +209,39 @@ class RefreshWiringTest(unittest.TestCase):
     엔진 맵을 만들어 넘기는지는 여기서 본다.
     """
 
-    def test_refresh가_엔진_기반_current_map을_넘긴다(self):
+    def test_배선이_쓰는_함수를_직접_호출해_검증한다(self):
+        """★ 문자열 검사가 아니라 **실제 함수**를 부른다 — 4회차 교차검증.
+
+        이전 판은 소스에 특정 문자열이 있는지만 봤다. 그래서 current_map의
+        반환을 적재분으로 되돌려도(=매 실행 차단되는 그 결함) 배선 테스트
+        3건이 전부 통과했다. 중첩 함수라 호출할 수 없었던 것이 원인이라
+        build_current_map을 모듈 레벨로 올리고 여기서 직접 부른다.
+        """
+        import json as _json
+
+        from refresh_corpus import build_current_map
+
+        corpus = Path(__file__).resolve().parents[1] / "data" / "rules_corpus.json"
+        raw = _json.loads(corpus.read_text(encoding="utf-8"))
+        raw = raw["rows"] if isinstance(raw, dict) else raw
+        cur = build_current_map(corpus, raw)
+        # 배선이 넘기는 그 맵으로 차단이 없어야 한다.
+        self.assertEqual(change_gate._blockers(raw, raw, cur, cur), [],
+                         "배선이 만든 맵이 차단된다 — 매 실행이 막힌다")
+        self.assertEqual(len(cur), len({str(r.get("record_id")) for r in raw
+                                        if r.get("record_id")}),
+                         "맵이 원본 행 전체를 덮지 않는다")
+        self.assertTrue(all(isinstance(v, bool) for v in cur.values()))
+        self.assertTrue(any(cur.values()), "현행이 하나도 없다 — 계산이 깨졌다")
+        self.assertFalse(all(cur.values()), "전부 현행이다 — 계열 계산이 꺼졌다")
+
+    def test_배포_흐름이_차단_상태를_확인한다(self):
         source = (Path(__file__).resolve().parents[1]
                   / "scripts" / "refresh_corpus.py").read_text(encoding="utf-8")
-        self.assertIn("def current_map(", source,
-                      "현행 맵 생성 함수가 사라졌다 — 배선이 끊기면 게이트가 차단된다")
-        self.assertIn("RuleSearchIndex", source,
-                      "현행성을 엔진으로 계산하지 않고 있다")
-        self.assertIn("prev_current=current_map(", source)
-        self.assertIn("new_current=current_map(", source)
-        # 맵은 원본 행 전체를 덮어야 한다 — 적재분만 담으면 매 실행이 차단된다.
-        self.assertIn("current_map(backup, prev_rows)", source)
-        self.assertIn("current_map(CORPUS, new_rows)", source)
         self.assertIn('change["blocked"]', source,
                       "차단 상태를 배포 흐름이 확인하지 않는다")
+        self.assertIn("build_current_map(backup, prev_rows)", source)
+        self.assertIn("build_current_map(CORPUS, new_rows)", source)
 
     def test_실제_배선_조합에서_차단되지_않는다(self):
         """★ 배선이 넘기는 것과 같은 조합으로 본다 — 실 코퍼스 전 행 + 실 맵.
