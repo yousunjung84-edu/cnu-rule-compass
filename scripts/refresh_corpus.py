@@ -145,14 +145,31 @@ def main() -> int:
         # change-set 승인 게이트 (backport #4, 코어 P1 이식 — 2026-08-31).
         # 테스트는 코퍼스의 형식을 보고, 이 게이트는 **이전 대비 변경**을 본다.
         # 규정 단위 소실이 있으면 지문 일치 승인 없이 채택하지 않는다.
-        # (운영본 코퍼스에는 is_current가 없어 승격 검사는 미래 대비다 —
-        # 현행성은 src/search.py가 런타임에 계산한다. 주 방어는 소실 게이트다.)
+        # 현행성은 코퍼스에 없다(is_current 키 0/17,585). src/search.py가 규정명의
+        # 「(… 개정전)」 표기로 적재 시점에 계산한다. 그래서 두 코퍼스를 각각
+        # 엔진에 올려 record_id→현행 맵을 만들어 넘긴다. 이 배선이 없으면
+        # 현행 관련 위험 검사가 전부 꺼진 채로 통과한다(2026-09-01 실측:
+        # 62행이 개정전으로 강등됐는데 위험 0건으로 통과).
         import change_gate
+        from src.search import RuleSearchIndex  # noqa: E402
+
+        def current_map(path) -> dict:
+            idx = RuleSearchIndex(path)
+            rows = idx.articles
+            rows = list(rows.values()) if isinstance(rows, dict) else list(rows)
+            return {str(r.get("record_id")): bool(r.get("is_current", True))
+                    for r in rows if r.get("record_id")}
+
         prev_rows = json.loads(backup.read_text(encoding="utf-8"))
         new_rows = json.loads(CORPUS.read_text(encoding="utf-8"))
-        ok, change = change_gate.guard(prev_rows, new_rows, approve=cli.approve)
+        ok, change = change_gate.guard(
+            prev_rows, new_rows, approve=cli.approve,
+            prev_current=current_map(backup), new_current=current_map(CORPUS))
         report["change_gate"] = {k: change[k] for k in
-                                 ("requires_approval", "fingerprint")}
+                                 ("requires_approval", "fingerprint",
+                                  "current_source")}
+        if change["renames"]:
+            log(f"[change-gate] 개명 {len(change['renames'])}건 (위험 아님, 보고서 기록)")
         if change["requires_approval"]:
             (ROOT / "data" / "pending_change_report.json").write_text(
                 json.dumps(change, ensure_ascii=False, indent=2), encoding="utf-8")
