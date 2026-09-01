@@ -28,11 +28,26 @@ class LineageStore:
 
     def __init__(self, lineage_path: str | Path = DEFAULT_LINEAGE_PATH) -> None:
         self.lineage_path = Path(lineage_path)
+        # ★ 왜 비었는지를 남긴다(2026-09-01 전송 단계 실측).
+        #
+        # 예전에는 읽기 실패를 그냥 빈 dict로 삼켰다. 그러면 「계열 데이터가
+        # 없다」와 「질의로 계열을 확정하지 못했다」가 같은 응답이 된다 —
+        # 설치본에서 RULE_COMPASS_DATA_DIR를 빠뜨리면 get_article_as_of가
+        # known_rules 0으로 조용히 죽는데, 응답은 질의 탓처럼 읽힌다.
+        # 운영자가 원인을 오진하는 자리라 사유를 응답까지 들고 간다.
+        self.load_error: str | None = None
         try:
             with self.lineage_path.open(encoding="utf-8") as file:
                 self.lineages: dict[str, list[dict]] = json.load(file)
-        except (OSError, json.JSONDecodeError):
+        except FileNotFoundError:
             self.lineages = {}
+            self.load_error = "파일 없음"
+        except json.JSONDecodeError as exc:
+            self.lineages = {}
+            self.load_error = f"JSON 파싱 실패: {exc.msg}"
+        except OSError as exc:
+            self.lineages = {}
+            self.load_error = f"읽기 실패: {exc.strerror or type(exc).__name__}"
 
     @property
     def rule_names(self) -> list[str]:

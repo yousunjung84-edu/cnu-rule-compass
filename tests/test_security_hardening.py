@@ -207,6 +207,70 @@ class SecurityHardeningTest(unittest.TestCase):
         self.assertEqual(original, backups[0].read_text(encoding="utf-8"))
 
 
+class LineageAvailabilityTest(unittest.TestCase):
+    """계열 데이터 부재를 「질의 문제」로 말하지 않는다 (2026-09-01 전송 단계).
+
+    설치본에서 운영 데이터 디렉터리를 빠뜨리면 시점 질의가 known_rules 0으로
+    조용히 죽는데, 예전 응답은 「질의로 개정 계열 규정을 확정할 수 없습니다」
+    였다 — 운영자가 질의를 고치며 시간을 버리는 자리다. 원인을 밝히게 한다.
+    """
+
+    def test_읽기_실패_사유가_남는다(self) -> None:
+        from src.lineage import LineageStore
+
+        store = LineageStore("/존재하지/않는/경로/lineage.json")
+        self.assertEqual({}, store.lineages)
+        self.assertEqual("파일 없음", store.load_error)
+
+    def test_깨진_JSON도_사유가_남는다(self) -> None:
+        import tempfile
+
+        from src.lineage import LineageStore
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
+                                         encoding="utf-8") as f:
+            f.write("{깨진")
+            path = f.name
+        try:
+            store = LineageStore(path)
+            self.assertEqual({}, store.lineages)
+            self.assertIn("JSON 파싱 실패", store.load_error or "")
+        finally:
+            Path(path).unlink()
+
+    def test_데이터가_있으면_사유가_없다(self) -> None:
+        from src.lineage import get_default_lineage
+
+        self.assertIsNone(get_default_lineage().load_error)
+
+    def test_as_of가_데이터_부재를_status로_구별한다(self) -> None:
+        import src.mcp_server as mod
+
+        class _Broken:
+            lineage_path = "/없는/경로.json"
+            load_error = "파일 없음"
+            rule_names: list = []
+
+            def resolve_rule(self, _query):
+                return None
+
+        original = mod.get_article_as_of.__globals__.get("get_default_lineage")
+        import src.lineage as lin
+
+        lin.get_default_lineage = lambda: _Broken()
+        try:
+            r = mod.get_article_as_of(rule_name="전남대학교 학칙", date="2020-01-01")
+        finally:
+            if original is not None:
+                lin.get_default_lineage = original
+            else:
+                import importlib
+                importlib.reload(lin)
+        self.assertEqual("unavailable", r["status"])
+        self.assertIn("계열 데이터", r["reason"])
+        self.assertIn("RULE_COMPASS_DATA_DIR", r["hint"])
+
+
 if __name__ == "__main__":
     unittest.main()
 

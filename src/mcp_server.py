@@ -358,6 +358,20 @@ def get_article_as_of(rule_name: str, date: str, keyword: str | None = None) -> 
 
     lineage = get_default_lineage()
     resolved = lineage.resolve_rule(rule_name.strip())
+    if resolved is None and getattr(lineage, "load_error", None):
+        # 데이터가 없어서 못 찾은 것을 「질의를 확정할 수 없다」로 말하면
+        # 운영자가 질의를 고치며 시간을 버린다. 원인을 그대로 밝힌다.
+        return {
+            "status": "unavailable",
+            "reason": (f"개정 계열 데이터를 읽지 못했습니다({lineage.load_error}). "
+                       "시점 질의는 이 데이터가 있어야 동작합니다."),
+            "rule": rule_name.strip(),
+            "date": date.strip(),
+            "known_rules": [],
+            "lineage_path": str(lineage.lineage_path),
+            "hint": ("설치본이라면 운영 데이터 디렉터리를 RULE_COMPASS_DATA_DIR로 "
+                     "주입했는지 확인하세요."),
+        }
     if resolved is None:
         # 오확정된 규정의 조문을 유효 판본으로 인용하지 않도록, 미해결·모호
         # 질의는 확정하지 않고 수집된 계열 목록을 함께 돌려준다.
