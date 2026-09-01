@@ -15,6 +15,9 @@ data/hwp_lineage/
 data/markdown_lineage/
 data/*.bak-*
 data/rules_corpus.pre_cleanup.json
+# 갱신·업그레이드 전 백업(각 34MB). 이미지에는 안 들어가지만
+# 업로드 컨텍스트만 부풀린다 — Dockerfile은 4개 파일만 COPY한다.
+data/rules_corpus.json.*
 data/regulations_corpus_raw.json
 data/listing_snapshot_*.json
 data/rule_site_listing_*.json

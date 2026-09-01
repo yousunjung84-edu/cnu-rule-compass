@@ -253,9 +253,24 @@ def main() -> int:
         )
         # min-instances는 상시 가동 정책(2026-08-19 확정)이다. 배포 시 명시하지 않으면
         # 기존 설정이 유지되지만, 명령만 보고 따라 하는 사람이 빠뜨리지 않게 박아 둔다.
+        # ⚠️ deploy 성공 메시지를 믿지 말 것 (2026-09-02 실측).
+        #
+        # 이 서비스는 트래픽이 특정 리비전에 고정(pin)돼 있다. 그 상태에서
+        # `gcloud run deploy`는 새 리비전을 만들되 **트래픽을 옮기지 않고**,
+        # 메시지는 *현재 서빙 중인* 리비전을 「100 percent of traffic」이라
+        # 보고한다. 명령은 exit 0으로 끝난다.
+        #
+        # 실제로 겪었다: 새 리비전 00028-ktt를 만들었는데 트래픽은 8/29자
+        # 00029-mat에 그대로였고, /health는 옛 코퍼스(17,287)를 계속 냈다.
+        # 리비전 번호도 시간순이 아니다 — 00028(9/2)이 00029(8/29)보다 나중이다.
+        #
+        # 그래서 배포 후에는 **health의 수치**로 확인한다. 메시지·종료코드가
+        # 아니라 서비스가 실제로 무엇을 내놓는지가 증거다.
         report["배포_후_확인"] = (
             "curl -s https://cnu-rule-compass-433006350023.asia-northeast3.run.app/health "
-            "# version·articles 확인 후 트래픽 100% 여부 점검"
+            f"# articles가 {after['조문']}건 아니면 트래픽이 안 옮겨간 것이다. "
+            "gcloud run services update-traffic cnu-rule-compass "
+            "--region=asia-northeast3 --to-revisions=<새_revision>=100"
         )
         report["롤백"] = (
             "gcloud run services update-traffic cnu-rule-compass --region=asia-northeast3 "
