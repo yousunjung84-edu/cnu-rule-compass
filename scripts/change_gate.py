@@ -20,6 +20,11 @@ import hashlib
 import json
 from collections import Counter
 
+# 지문 산식 버전. 위험 항목의 필드나 canonical 정렬이 바뀌면 올린다 —
+# 옛 승인이 안 맞는 이유가 「재실행 드리프트」인지 「포맷 변경」인지
+# 사용자가 구별할 수 있어야 한다.
+FINGERPRINT_VERSION = 2
+
 
 def _per_rule(rows: list[dict]) -> dict[str, int]:
     out: Counter = Counter()
@@ -52,6 +57,40 @@ def _current_per_rule(rows: list[dict], current: dict[str, bool] | None) -> dict
         if is_cur:
             out[str(r.get("source_key"))] += 1
     return dict(out)
+
+
+def _blockers(prev_rows: list[dict], new_rows: list[dict],
+              prev_current: dict[str, bool] | None,
+              new_current: dict[str, bool] | None) -> list[dict]:
+    """**승인으로 넘길 수 없는** 차단 사유. 하나라도 있으면 지문을 발급하지 않는다.
+
+    위험(risk)과 다르다. 위험은 「사람이 보고 받아들일 수 있는 변경」이고,
+    차단은 「무엇이 변했는지 판정 자체를 못 한 상태」다. 후자를 승인 가능하게
+    두면 검사를 끄는 스위치가 된다.
+    """
+    out: list[dict] = []
+    for label, rows, cur in (("prev", prev_rows, prev_current),
+                             ("new", new_rows, new_current)):
+        if cur is None:
+            out.append({"type": "current_map_missing", "side": label,
+                        "detail": "현행 맵이 전달되지 않았습니다. 호출자가 엔진으로 "
+                                  "record_id→is_current 맵을 만들어 넘겨야 합니다."})
+            continue
+        ids = {str(r.get("record_id")) for r in rows if r.get("record_id")}
+        missing = ids - set(cur)
+        if missing:
+            out.append({"type": "current_map_incomplete", "side": label,
+                        "missing_count": len(missing), "total": len(ids),
+                        "sample": sorted(missing)[:5],
+                        "detail": "현행 맵이 일부 record_id를 덮지 않습니다. "
+                                  "빈 맵이나 부분 맵으로는 현행 검사가 성립하지 "
+                                  "않습니다."})
+        bad = [k for k, v in cur.items() if not isinstance(v, bool)]
+        if bad:
+            out.append({"type": "current_map_type", "side": label,
+                        "count": len(bad), "sample": sorted(map(str, bad))[:5],
+                        "detail": "현행 맵의 값은 참/거짓이어야 합니다."})
+    return out
 
 
 def change_report(prev_rows: list[dict], new_rows: list[dict],
@@ -114,26 +153,34 @@ def change_report(prev_rows: list[dict], new_rows: list[dict],
     risks = ([{"type": "article_loss", **l} for l in losses]
              + [{"type": "current_article_loss", **l} for l in current_losses]
              + [{"type": "current_promotion", **p} for p in promotions])
-    if current_source != "engine":
-        # ★ fail-closed (2026-09-01 2회차 교차검증 #5).
-        #
-        # 맵 없이 부르면 코퍼스에 없는 is_current를 읽어 현행 수와 승격이 전부
-        # 0으로 나온다 — 현행 관련 검사가 꺼진 채 「위험 없음」이 된다. 보고서에
-        # current_source를 적는 것만으로는 통과를 막지 못했다. 꺼진 상태 자체를
-        # 위험으로 올려 사람이 지문을 승인해야 지나가게 한다.
-        risks.append({
-            "type": "current_source_missing",
-            "detail": "현행 맵이 전달되지 않아 현행 소실·승격 검사가 동작하지 "
-                      "않았습니다. 호출자가 엔진으로 record_id→is_current 맵을 "
-                      "만들어 prev_current/new_current로 넘겨야 합니다.",
-        })
-    canonical = json.dumps(risks, ensure_ascii=False, sort_keys=True,
-                           separators=(",", ":"))
+    # ★ 검증 불능은 **승인 대상이 아니라 차단 대상**이다(3회차 교차검증).
+    #
+    # 처음에는 맵이 없으면 current_source_missing을 위험 목록에 넣었다. 그런데
+    # 그 위험은 고정 문자열 하나라 **서로 다른 변경이 같은 지문**을 만든다 —
+    # 한 번 받은 승인이 다음 변경에도 통하는 우회 토큰이 됐다(재현 확인).
+    # 지문 결속의 요점은 「내용이 바뀌면 승인이 무효」인데 그 성질이 없는 항목을
+    # 위험에 넣은 것이 잘못이었다.
+    #
+    # 그리고 맵의 **존재만** 봤다. 빈 맵({})을 넘기면 engine으로 인정돼 현행
+    # 검사가 그대로 꺼진 채 통과했다. 이제 완전성까지 본다.
+    blockers = _blockers(prev_rows, new_rows, prev_current, new_current)
+    # 지문은 **순서에 흔들리지 않아야** 한다(3회차 교차검증). promotions가
+    # new_rows 순서를 그대로 담아, 같은 두 승격의 행 순서만 뒤집혀도 지문이
+    # 달라졌다 — 재실행 드리프트와 실제 변경을 구별할 수 없게 만든다.
+    canonical = json.dumps(
+        sorted(risks, key=lambda r: json.dumps(r, ensure_ascii=False, sort_keys=True)),
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
     return {
-        "requires_approval": bool(risks),
-        "fingerprint": fingerprint if risks else None,
+        # 차단이 있으면 승인 절차 자체가 열리지 않는다 — 지문도 발급하지 않는다.
+        "blocked": bool(blockers),
+        "blockers": blockers,
+        "requires_approval": bool(risks) and not blockers,
+        "fingerprint": (fingerprint if risks and not blockers else None),
         "risks": risks,
+        # 지문 산식이 바뀌면 옛 승인이 조용히 안 맞는다. 사용자가 재실행
+        # 드리프트와 포맷 변경을 구별할 수 있게 버전을 박는다.
+        "fingerprint_version": FINGERPRINT_VERSION,
         "new_rules": sorted(set(nc) - set(pc)),
         "renames": renames,
         # 현행성을 무엇으로 판정했는지 밝힌다. engine이 아니면 현행 관련 위험
@@ -159,6 +206,10 @@ def guard(prev_rows: list[dict], new_rows: list[dict],
     플래그 조합으로도 우회할 수 없다(코어 P1과 같은 계약).
     """
     report = change_report(prev_rows, new_rows, prev_current, new_current)
+    if report["blocked"]:
+        # 어떤 승인으로도 지나갈 수 없다. 판정을 못 한 상태를 승인 가능하게
+        # 두면 그 승인이 검사를 끄는 스위치가 된다.
+        return False, report
     if not report["requires_approval"]:
         return True, report
     return approve == report["fingerprint"], report

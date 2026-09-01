@@ -153,23 +153,43 @@ def main() -> int:
         import change_gate
         from src.search import RuleSearchIndex  # noqa: E402
 
-        def current_map(path) -> dict:
+        def current_map(path, raw: list[dict]) -> dict:
+            """record_id → 현행 여부. **원본 행 전체**를 덮는다.
+
+            엔진 적재분만 담으면 적재 게이트가 걸러낸 레코드(빈 본문·중복·
+            초과)가 맵에서 빠져 change_gate가 「맵 불완전」으로 차단한다 —
+            17,585행 대비 221건이 비어 매 실행이 막힌다(실측). 적재되지 않은
+            레코드는 검색에 잡히지 않으므로 현행일 수 없다: False로 덮는다.
+            """
             idx = RuleSearchIndex(path)
             rows = idx.articles
             rows = list(rows.values()) if isinstance(rows, dict) else list(rows)
-            return {str(r.get("record_id")): bool(r.get("is_current", True))
-                    for r in rows if r.get("record_id")}
+            loaded = {str(r.get("record_id")): bool(r.get("is_current", True))
+                      for r in rows if r.get("record_id")}
+            return {str(r.get("record_id")): loaded.get(str(r.get("record_id")), False)
+                    for r in raw if r.get("record_id")}
 
         prev_rows = json.loads(backup.read_text(encoding="utf-8"))
         new_rows = json.loads(CORPUS.read_text(encoding="utf-8"))
         ok, change = change_gate.guard(
             prev_rows, new_rows, approve=cli.approve,
-            prev_current=current_map(backup), new_current=current_map(CORPUS))
+            prev_current=current_map(backup, prev_rows),
+            new_current=current_map(CORPUS, new_rows))
         report["change_gate"] = {k: change[k] for k in
                                  ("requires_approval", "fingerprint",
-                                  "current_source")}
+                                  "current_source", "blocked",
+                                  "fingerprint_version")}
         if change["renames"]:
             log(f"[change-gate] 개명 {len(change['renames'])}건 (위험 아님, 보고서 기록)")
+        if change["blocked"]:
+            # 승인으로 넘길 수 없는 상태 — 지문도 없다. 배선이 깨졌다는 뜻이다.
+            (ROOT / "data" / "pending_change_report.json").write_text(
+                json.dumps(change, ensure_ascii=False, indent=2), encoding="utf-8")
+            raise RuntimeError(
+                "change-gate 차단: " + "; ".join(
+                    f"{b['type']}({b.get('side','')})" for b in change["blockers"])
+                + " — 현행 판정이 성립하지 않아 어떤 승인으로도 채택할 수 없다. "
+                  "current_map 배선을 확인할 것")
         if change["requires_approval"]:
             (ROOT / "data" / "pending_change_report.json").write_text(
                 json.dumps(change, ensure_ascii=False, indent=2), encoding="utf-8")
