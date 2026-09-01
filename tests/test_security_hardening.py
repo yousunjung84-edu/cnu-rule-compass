@@ -227,16 +227,60 @@ class UsageLogPrivacyTest(unittest.TestCase):
         from src.mcp_server import search_rule
 
         needle = "홍길동주민번호같은민감어"
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
+        # 집계는 전송에 따라 스트림이 다르다(2026-09-01): stdio는 stderr,
+        # HTTP는 stdout. **두 스트림 모두**를 받아 검사한다 — 한쪽만 보면
+        # 채널이 바뀌었을 때 「로그가 비었다」로 통과하거나 실패한다.
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             search_rule(f"{needle} 학사경고")
         logged = "\n".join(
-            line for line in buffer.getvalue().splitlines() if line.strip().startswith("{")
+            line for line in (out.getvalue() + "\n" + err.getvalue()).splitlines()
+            if line.strip().startswith("{")
         )
         self.assertTrue(logged, "집계 로그가 비어 있습니다")
         self.assertNotIn(needle, logged)
         # 못 찾은 단어도 질의어의 부분집합이라 싣지 않는다 — 개수만 남긴다.
         self.assertIn("unmatched_terms", logged)
+
+    @unittest.skipUnless(DEFAULT_CORPUS_PATH.exists(), "코퍼스 미수집 환경")
+    def test_stdio_전송에서는_stdout을_오염시키지_않는다(self) -> None:
+        """stdio에서 stdout은 JSON-RPC 전용 채널이다(2026-09-01 전송 게이트).
+
+        집계를 stdout에 쓰면 도구 호출마다 비-JSON-RPC 라인이 끼어 스트림이
+        한 줄씩 밀린다 — 로컬 클라이언트가 첫 호출 이후 응답을 잘못 읽는다.
+        실측으로 재현한 뒤 기본 채널을 stderr로 바꿨다.
+        """
+        import contextlib
+        import importlib
+        import io
+
+        import src.mcp_server as mod
+
+        importlib.reload(mod)  # 다른 테스트가 stdout으로 올렸을 수 있다
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            mod.search_rule("학칙", k=2)
+        self.assertEqual("", out.getvalue().strip(),
+                         "stdio 기본 채널에서 stdout에 무언가 쓰였다")
+        self.assertIn('"usage"', err.getvalue())
+
+    def test_http_전송은_집계를_stdout으로_올린다(self) -> None:
+        """Cloud Logging이 수집하는 채널 — HTTP 진입점이 명시적으로 올린다."""
+        import contextlib
+        import importlib
+        import io
+
+        import src.mcp_server as mod
+
+        importlib.reload(mod)
+        try:
+            mod.use_stdout_for_usage()
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                mod._log_usage("search_rule", status="ok")
+            self.assertIn('"usage"', out.getvalue())
+        finally:
+            importlib.reload(mod)
 
     def test_usage_log_can_be_disabled(self) -> None:
         import contextlib

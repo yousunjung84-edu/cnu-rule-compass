@@ -36,6 +36,39 @@ MAX_QUERY_LENGTH = 500
 _DATE_FORMAT = "YYYY-MM-DD"
 
 
+# 집계를 어느 스트림에 쓸 것인가. HTTP 진입점이 stdout으로 올린다.
+#
+# 스트림 **객체**가 아니라 이름을 들고 있는다. 객체를 잡아 두면 import 시점의
+# sys.stderr에 묶여, 나중에 스트림을 갈아끼운 쪽(테스트의 redirect_stderr,
+# 로깅 래퍼)에 글이 가지 않는다 — 쓰는 시점에 조회해야 맞다.
+_USAGE_CHANNEL = "stderr"
+
+
+def use_stdout_for_usage() -> None:
+    """HTTP 전송에서만 집계를 stdout으로 보낸다 (Cloud Logging 수집 대상).
+
+    ★ 기본은 stderr다(2026-09-01 전송 게이트에서 실측 후 변경).
+
+    stdio 전송에서 stdout은 **JSON-RPC 전용 채널**이다. 집계를 stdout에 쓰면
+    도구 호출마다 비-JSON-RPC 라인이 끼어 스트림이 한 줄씩 밀린다 — 로컬
+    클라이언트(Claude Desktop·Claude Code MCP 설정)는 첫 호출 이후 응답을
+    잘못 읽는다. 실측: tools/call 1회에 stdout 첫 줄이 {"usage": ...}였다.
+
+    같은 파일 main()의 주석이 「stdio에서 stdout은 JSON-RPC 전용」이라고
+    적어 두었는데 이 함수가 그것을 어기고 있었다. 의도가 아니라 구현이
+    틀린 자리라 기본값을 안전한 쪽(stderr)으로 두고, stdout이 로그 채널인
+    HTTP 진입점만 명시적으로 올린다.
+
+    Cloud Run 운영에는 영향이 없다 — HTTP 전송이라 이 함수가 호출된다.
+    """
+    global _USAGE_CHANNEL
+    _USAGE_CHANNEL = "stdout"
+
+
+def _usage_stream():
+    return sys.stdout if _USAGE_CHANNEL == "stdout" else sys.stderr
+
+
 def _log_usage(tool: str, **fields) -> None:
     """익명 사용 집계를 stdout에 구조화 JSON으로 남긴다 (2026-08-28, 박사 확정 (나)안).
 
@@ -50,12 +83,15 @@ def _log_usage(tool: str, **fields) -> None:
     몇 건이나, 어떤 advisory가 자주 뜨나.
 
     파일에 쓰지 않는다 — Cloud Run 파일시스템은 휘발성이라 재시작하면 사라진다.
-    stdout은 Cloud Logging이 자동 수집한다.
+    출력 스트림은 전송이 정한다(use_stdout_for_usage 참고): HTTP는 stdout으로
+    올려 Cloud Logging이 수집하고, stdio는 stderr로 둬 JSON-RPC를 오염시키지
+    않는다.
     """
     if os.environ.get("RULECOMPASS_USAGE_LOG", "1").strip() == "0":
         return
     try:
-        print(json.dumps({"usage": tool, **fields}, ensure_ascii=False), flush=True)
+        print(json.dumps({"usage": tool, **fields}, ensure_ascii=False),
+              file=_usage_stream(), flush=True)
     except Exception:
         # 집계 실패가 도구 응답을 막지 않는다.
         pass

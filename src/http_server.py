@@ -13,7 +13,8 @@ from __future__ import annotations
 import os
 import sys
 
-from src.mcp_server import SERVER_VERSION, create_server
+from src.mcp_server import (SERVER_VERSION, create_server,
+                            use_stdout_for_usage)
 from src.profile import active_profile
 from src.search import get_default_index
 
@@ -35,6 +36,9 @@ def read_port(value: str | None = None) -> int:
 
 
 def create_http_server():
+    # 이 전송에서는 stdout이 로그 채널이다(Cloud Logging 자동 수집).
+    # stdio에서는 JSON-RPC 전용이라 집계 기본값이 stderr다.
+    use_stdout_for_usage()
     allowed_hosts = read_allowed_hosts()
     settings: dict = {
         "host": "0.0.0.0",
