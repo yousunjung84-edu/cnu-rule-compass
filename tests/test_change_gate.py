@@ -23,12 +23,14 @@ def _row(rid, key="K", name="R", art="제1조"):
     return {"record_id": rid, "source_key": key, "규정명": name, "조문번호": art}
 
 
+_OLD = "R (2026. 8. 19. 개정전)"      # 구판 표기 — 계열은 그대로 "R"이다
+
+
 class ChangeGateCurrentTest(unittest.TestCase):
     def test_현행_0건이_되면_위험이고_승인_없이는_채택_못한다(self):
         """실제 사건의 축약 — 개명으로 구판만 남고 신판이 안 들어온 경우."""
         prev = [_row("a"), _row("b", art="제2조")]
-        new = [_row("a", name="R (2026. 8. 19. 개정전)"),
-               _row("b", name="R (2026. 8. 19. 개정전)", art="제2조")]
+        new = [_row("a", name=_OLD), _row("b", name=_OLD, art="제2조")]
         ok, report = change_gate.guard(
             prev, new, prev_current={"a": True, "b": True},
             new_current={"a": False, "b": False})
@@ -37,6 +39,7 @@ class ChangeGateCurrentTest(unittest.TestCase):
         self.assertEqual(len(risks), 1)
         self.assertEqual((risks[0]["before"], risks[0]["after"]), (2, 0))
         self.assertEqual(risks[0]["severity"], "current_zero")
+        self.assertEqual(risks[0]["계열"], "R", "계열 단위로 보고해야 한다")
         # 개명은 위험이 아니라 참고 변화로만 남는다.
         self.assertEqual(len(report["renames"]), 1)
 
@@ -216,6 +219,39 @@ class ChangeGateCurrentTest(unittest.TestCase):
                 self.assertNotEqual(one, two,
                                     f"{label}이 다른데 같은 지문 — 승인이 재사용된다")
 
+    def test_정상_개정은_위험이_아니다(self):
+        """★ 구판 강등 + 신판 유입 — 계열에 현행이 남으므로 통과 (2026-09-02).
+
+        이 학교는 개정 시 신판에 **새 source_key**를 준다. source_key로 현행
+        소실을 보면 정상 아카이브가 전부 위험이 된다 — 실측으로 809 key 중
+        391개(48%)가 현행 0이었고 그중 355개가 정상 아카이브였다.
+        """
+        prev = [_row("a", key="5043")]
+        new = [_row("a", key="5043", name=_OLD), _row("b", key="5063")]
+        ok, report = change_gate.guard(
+            prev, new, prev_current={"a": True},
+            new_current={"a": False, "b": True})
+        self.assertTrue(ok, "정상 개정이 위험으로 잡혔다")
+        self.assertEqual([], [r for r in report["risks"]
+                              if r["type"] == "current_article_loss"])
+        self.assertEqual(1, len(report["renames"]), "개명은 참고 변화로 남아야 한다")
+
+    def test_계열_접미사_규칙(self):
+        """실측으로 확정한 규칙 — 「제정」은 제목의 일부일 수 있다."""
+        cases = {
+            "전남대학교 마이크로디그리 운영 지침 (2026. 8. 19. 개정전)": "전남대학교 마이크로디그리 운영 지침",
+            "전남대학교 대학원 협동과정 운영지침(2015. 6. 이전)": "전남대학교 대학원 협동과정 운영지침",
+            "전남대학교 대학원 지도교수 운영지침 (2019. 6월 개정전)": "전남대학교 대학원 지도교수 운영지침",
+            # 아래 둘은 벗기면 안 된다.
+            "전남대학교 전신 학교 졸업자 등에 대한 명예졸업증서 수여 규정 제정":
+                "전남대학교 전신 학교 졸업자 등에 대한 명예졸업증서 수여 규정 제정",
+            "전남대학교 대학원생 권리장전 (현행, 2016. 8. 26.(제정))":
+                "전남대학교 대학원생 권리장전 (현행, 2016. 8. 26.(제정))",
+        }
+        for name, want in cases.items():
+            with self.subTest(name[:24]):
+                self.assertEqual(want, change_gate.lineage_of(name))
+
     def test_조문_통합은_current_drop으로_구분된다(self):
         """구판 2조문을 신판 1개 통합 조문이 대체하는 정상 개정 — 교차검증 #6.
 
@@ -225,7 +261,7 @@ class ChangeGateCurrentTest(unittest.TestCase):
         prev = [_row("a"), _row("b", art="제2조")]
         new = [_row("a", name="R (2026. 1. 1. 개정전)"),
                _row("b", name="R (2026. 1. 1. 개정전)", art="제2조"),
-               _row("c")]
+               _row("c", key="K2")]
         _, report = change_gate.guard(
             prev, new, prev_current={"a": True, "b": True},
             new_current={"a": False, "b": False, "c": True})

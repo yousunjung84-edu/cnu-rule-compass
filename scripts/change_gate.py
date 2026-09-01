@@ -18,12 +18,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import Counter
 
 # 지문 산식 버전. 위험 항목의 필드나 canonical 정렬이 바뀌면 올린다 —
 # 옛 승인이 안 맞는 이유가 「재실행 드리프트」인지 「포맷 변경」인지
 # 사용자가 구별할 수 있어야 한다.
-FINGERPRINT_VERSION = 3
+FINGERPRINT_VERSION = 4
 
 
 def _per_rule(rows: list[dict]) -> dict[str, int]:
@@ -56,6 +57,47 @@ def _current_per_rule(rows: list[dict], current: dict[str, bool] | None) -> dict
         is_cur = current.get(rid, False) if current is not None else bool(r.get("is_current"))
         if is_cur:
             out[str(r.get("source_key"))] += 1
+    return dict(out)
+
+
+# ★ 계열(lineage) 단위 판정 — source_key로는 정상 개정과 사고를 구별 못 한다.
+#
+# 이 학교는 개정 시 구판을 「…(개정전)」으로 개명하고 **신판에 새 key를 준다**.
+# 그래서 구판 key는 정상 개정이면 반드시 현행 0이 된다. source_key로 현행
+# 소실을 보면 정상 아카이브가 전부 위험으로 잡힌다.
+#
+#   2026-09-02 실측: source_key 809개 중 현행 0인 key 391개(48%),
+#   그중 355개가 이름에 「개정전/이전」이 붙은 정상 아카이브였다.
+#   같은 코퍼스를 계열로 묶으면 476계열 중 현행 0은 65계열뿐이다.
+#
+# 사고(신판 미수집)와 정상 개정의 차이는 **계열에 현행이 남아 있는가**다.
+# 8/19 사건 때 4개 규정은 계열 단위로도 0이었고, 신판을 받은 뒤 25·12·17·9로
+# 살아났다. 그것이 우리가 잡고 싶은 신호다.
+#
+# 접미사 규칙은 실측으로 확정했다(규정명 808종). 날짜 + (개정전|이전)을 담은
+# **말미 괄호구**만 벗긴다. 「제정」은 제목의 일부일 수 있어(「…수여 규정 제정」)
+# 마커에서 뺐고, 「2019. 6월 개정전」 같은 월 표기도 받는다.
+_ARCHIVE_SUFFIX = re.compile(
+    r"\s*[（(]?\s*(?:19|20)\d\d\s*[.\s]\s*\d{1,2}\s*(?:월)?\s*[.\s]?\s*\d{0,2}"
+    r"\s*[.,]?\s*(?:개정전|이전)\s*[)）]?\s*$")
+
+
+def lineage_of(name: str) -> str:
+    """규정명에서 아카이브 접미사를 벗겨 계열 이름을 얻는다."""
+    prev, cur = None, str(name).strip()
+    while prev != cur:                      # 접미사가 겹쳐 붙은 이름도 있다
+        prev, cur = cur, _ARCHIVE_SUFFIX.sub("", cur).strip()
+    return cur
+
+
+def _current_per_lineage(rows: list[dict], current: dict[str, bool] | None) -> dict[str, int]:
+    """계열별 현행 조문 수."""
+    out: Counter = Counter()
+    for r in rows:
+        rid = str(r.get("record_id", ""))
+        is_cur = current.get(rid, False) if current is not None else bool(r.get("is_current"))
+        if is_cur:
+            out[lineage_of(r.get("규정명", ""))] += 1
     return dict(out)
 
 
@@ -264,22 +306,21 @@ def change_report(prev_rows: list[dict], new_rows: list[dict],
                   for r in new_rows
                   if (rid := str(r.get("record_id")))
                   and prev_cur.get(rid) is False and new_cur.get(rid, False)]
-    pcc, ncc = (_current_per_rule(prev_rows, prev_current),
-                _current_per_rule(new_rows, new_current))
+    pcc, ncc = (_current_per_lineage(prev_rows, prev_current),
+                _current_per_lineage(new_rows, new_current))
     # ★ 위험 항목은 **무엇이 바뀌었는지**까지 담아야 지문이 내용에 결속된다
     # (4회차 교차검증). before/after 수치만 담으면 같은 규정 안의 서로 다른
     # 강등이 같은 지문을 만들고, 한 번 받은 승인이 다른 변경에 재사용된다.
     # 실측: 조문 a 강등과 조문 b 강등이 둘 다 5dc4823b740b였다.
-    demoted_by_key: dict[str, list[str]] = {}
+    demoted_by_lin: dict[str, list[str]] = {}
     for r in prev_rows:
         rid = str(r.get("record_id", ""))
         if rid and prev_cur.get(rid) and not new_cur.get(rid, False):
-            demoted_by_key.setdefault(str(r.get("source_key")), []).append(rid)
-    current_losses = [{"source_key": k, "규정명": names.get(k, ""),
-                       "before": pcc[k], "after": ncc.get(k, 0),
+            demoted_by_lin.setdefault(lineage_of(r.get("규정명", "")), []).append(rid)
+    current_losses = [{"계열": k, "before": pcc[k], "after": ncc.get(k, 0),
                        "severity": "current_zero" if ncc.get(k, 0) == 0
                                    else "current_drop",
-                       "demoted_ids": sorted(demoted_by_key.get(k, []))}
+                       "demoted_ids": sorted(demoted_by_lin.get(k, []))}
                       for k in sorted(pcc) if ncc.get(k, 0) < pcc[k]]
     # 개명은 위험이 아니라 참고 변화 — 다만 보고서에는 반드시 남긴다.
     renames = _renames(prev_rows, new_rows)
@@ -320,7 +361,7 @@ def change_report(prev_rows: list[dict], new_rows: list[dict],
                 "before": dict(Counter(str(r.get("record_type")) for r in prev_rows)),
                 "after": dict(Counter(str(r.get("record_type")) for r in new_rows)),
             },
-            "현행_규정수": {"before": len(pcc), "after": len(ncc)},
+            "현행_계열수": {"before": len(pcc), "after": len(ncc)},
         },
     }
 
