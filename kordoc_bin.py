@@ -119,6 +119,55 @@ def kordoc_env() -> dict[str, str]:
     return resolve_kordoc()[1]
 
 
+def latest_published(timeout: int = 30) -> str | None:
+    """npm에 올라온 최신 kordoc 버전. 조회 실패는 None — 알림이 작업을 막지 않는다.
+
+    npm도 nvm 아래에 있어 무인 실행에서는 PATH에 없다. kordoc과 같은 환경을
+    쓴다 — 같은 원인으로 두 번 넘어지지 않게.
+    """
+    env = kordoc_env()
+    for npm in ("npm",):
+        try:
+            done = subprocess.run([npm, "view", "kordoc", "version"],
+                                  capture_output=True, text=True,
+                                  timeout=timeout, env=env)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if done.returncode == 0 and done.stdout.strip():
+            return done.stdout.strip().splitlines()[0].strip()
+    return None
+
+
+def _as_tuple(v: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except ValueError:
+        return (0,)
+
+
+def version_report(timeout: int = 30) -> dict:
+    """설치본 ↔ npm 최신 대조. 주간 잡이 알림에 싣는다.
+
+    자동 업데이트는 하지 않는다(2026-09-01 박사 결정: 알림까지). 파서가 바뀌면
+    같은 HWP가 다른 조문으로 잘릴 수 있고, 그 변화가 코퍼스에 조용히 스며드는
+    것보다 사람이 한 번 보고 올리는 편이 안전하다.
+    """
+    try:
+        installed = kordoc_version()
+    except RuntimeError as exc:
+        return {"installed": None, "latest": None, "behind": True,
+                "note": str(exc).splitlines()[0]}
+    latest = latest_published(timeout)
+    if latest is None:
+        return {"installed": installed, "latest": None, "behind": False,
+                "note": "npm 조회 실패 — 판정 보류(네트워크·npm 부재)"}
+    behind = _as_tuple(installed) < _as_tuple(latest)
+    return {"installed": installed, "latest": latest, "behind": behind,
+            "note": (f"kordoc {installed} → npm {latest} 갱신 가능. "
+                     "`npm i -g kordoc` 후 주간 재수집으로 영향 확인할 것."
+                     if behind else "최신")}
+
+
 def kordoc_command(src: Path, out: Path) -> list[str]:
     """`kordoc <src> -o <out>` 명령. 호출부는 env=kordoc_env()도 함께 넘긴다."""
     return [kordoc_binary(), str(src), "-o", str(out)]
@@ -134,3 +183,4 @@ if __name__ == "__main__":  # 진단용: 어느 것을 쓸지 눈으로 확인�
     b, env = resolve_kordoc()
     print(f"kordoc {kordoc_version()}  {b}")
     print(f"PATH 앞머리: {env['PATH'].split(os.pathsep)[0]}")
+    print(f"버전 대조: {version_report()}")
