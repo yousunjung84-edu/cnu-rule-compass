@@ -23,7 +23,7 @@ from collections import Counter
 # 지문 산식 버전. 위험 항목의 필드나 canonical 정렬이 바뀌면 올린다 —
 # 옛 승인이 안 맞는 이유가 「재실행 드리프트」인지 「포맷 변경」인지
 # 사용자가 구별할 수 있어야 한다.
-FINGERPRINT_VERSION = 2
+FINGERPRINT_VERSION = 3
 
 
 def _per_rule(rows: list[dict]) -> dict[str, int]:
@@ -59,6 +59,48 @@ def _current_per_rule(rows: list[dict], current: dict[str, bool] | None) -> dict
     return dict(out)
 
 
+def _renames(prev_rows: list[dict], new_rows: list[dict]) -> list[dict]:
+    """source_key별 규정명 변경. 위험이 아니라 참고 변화다."""
+    prev_names, new_names = _names(prev_rows), _names(new_rows)
+    return [{"source_key": k, "before": prev_names[k], "after": new_names[k]}
+            for k in sorted(set(prev_names) & set(new_names))
+            if prev_names[k] != new_names[k]]
+
+
+def _state_digest(rows: list[dict], current: dict[str, bool]) -> str:
+    """코퍼스 상태의 완전 요약. **지문의 재료다.**
+
+    ★ 왜 위험 목록이 아니라 상태에서 뽑는가(5회차 교차검증).
+
+    지문을 risks에서 만들면, 위험 항목이 담지 않은 차이는 지문에 남지 않는다.
+    항목마다 필드를 덧붙여 막아 왔는데 계속 샜다:
+      · lost_ids를 넣었더니 중복 정리([a,a]→[a] vs [b,b]→[b])에서 둘 다 비어
+        같은 지문 97fa0c366166
+      · 규정명은 {**new, **prev}라 늘 이전 이름이라 개명이 결속 안 됨
+        (NEW-1/NEW-2 개명 둘 다 25ba25cd5d3d)
+      · current_promotion에 source_key가 없어 다른 규정의 승격이 같은 지문
+    「무엇을 위험으로 부르는가」와 「무엇이 바뀌었는가」는 다른 질문이고,
+    승인은 후자에 결속돼야 한다. 여기서는 행 다중집합·규정명·현행성을
+    통째로 해시한다 — 한 글자만 달라도 지문이 달라진다.
+
+    record_id별로 (등장 횟수, 규정명, source_key, 조문번호, 현행성)을 담는다.
+    본문까지 넣지 않는 것은 record_id가 이미 내용 해시이기 때문이다.
+    """
+    counts: dict[str, int] = {}
+    meta: dict[str, list] = {}
+    for r in rows:
+        rid = str(r.get("record_id") or "")
+        counts[rid] = counts.get(rid, 0) + 1
+        meta[rid] = [str(r.get("규정명", "")), str(r.get("source_key", "")),
+                     str(r.get("조문번호", ""))]
+    payload = [[rid, counts[rid], *meta[rid], bool(current.get(rid, False))]
+               for rid in sorted(counts)]
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                   separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def _blockers(prev_rows: list[dict], new_rows: list[dict],
               prev_current: dict[str, bool] | None,
               new_current: dict[str, bool] | None) -> list[dict]:
@@ -69,6 +111,14 @@ def _blockers(prev_rows: list[dict], new_rows: list[dict],
     두면 검사를 끄는 스위치가 된다.
     """
     out: list[dict] = []
+    for label, rows in (("prev", prev_rows), ("new", new_rows)):
+        # 행이 dict가 아니면 아래 r.get에서 예외가 난다 — 구조화된 차단으로 돌린다.
+        bad_rows = sum(1 for r in rows if not isinstance(r, dict))
+        if bad_rows:
+            out.append({"type": "row_type", "side": label, "count": bad_rows,
+                        "detail": "행이 dict가 아닙니다."})
+    if out:
+        return out
     for label, rows, cur in (("prev", prev_rows, prev_current),
                              ("new", new_rows, new_current)):
         # 맵이 dict가 아니면 아래 검사가 예외로 터진다. 구조화된 차단으로 돌려
@@ -171,13 +221,22 @@ def change_report(prev_rows: list[dict], new_rows: list[dict],
     # ★ 차단부터 판정한다. 위험 계산은 맵이 정상일 때만 의미가 있고, 비정상
     # 입력(맵이 list 등)에서는 예외로 터져 구조화된 보고서조차 못 남긴다.
     blockers = _blockers(prev_rows, new_rows, prev_current, new_current)
-    current_source = ("engine" if (prev_current is not None and new_current is not None)
+    # 맵이 dict가 아니면 「엔진 맵을 받았다」고 말할 수 없다 — 진단 메타가
+    # 사실과 달라지면 사후 추적이 어긋난다(5회차 교차검증).
+    current_source = ("engine"
+                      if (isinstance(prev_current, dict)
+                          and isinstance(new_current, dict))
                       else "row_field")
     if blockers:
         return {
             "blocked": True, "blockers": blockers,
             "requires_approval": False, "fingerprint": None, "risks": [],
-            "new_rules": [], "renames": [],
+            # 차단이어도 개명은 계산해 남긴다 — 배포 로그가 실제 변경 정보를
+            # 잃으면 「왜 막혔는지」를 사람이 재구성할 수 없다(5회차 교차검증).
+            "new_rules": sorted(set(_per_rule(new_rows)) - set(_per_rule(prev_rows)))
+                         if all(isinstance(r, dict) for r in prev_rows + new_rows) else [],
+            "renames": _renames(prev_rows, new_rows)
+                       if all(isinstance(r, dict) for r in prev_rows + new_rows) else [],
             "current_source": current_source,
             "fingerprint_version": FINGERPRINT_VERSION,
             "distribution": {},
@@ -223,18 +282,22 @@ def change_report(prev_rows: list[dict], new_rows: list[dict],
                        "demoted_ids": sorted(demoted_by_key.get(k, []))}
                       for k in sorted(pcc) if ncc.get(k, 0) < pcc[k]]
     # 개명은 위험이 아니라 참고 변화 — 다만 보고서에는 반드시 남긴다.
-    prev_names, new_names = _names(prev_rows), _names(new_rows)
-    renames = [{"source_key": k, "before": prev_names[k], "after": new_names[k]}
-               for k in sorted(set(prev_names) & set(new_names))
-               if prev_names[k] != new_names[k]]
+    renames = _renames(prev_rows, new_rows)
     risks = ([{"type": "article_loss", **l} for l in losses]
              + [{"type": "current_article_loss", **l} for l in current_losses]
              + [{"type": "current_promotion", **p} for p in promotions])
     # 지문은 **순서에 흔들리지 않아야** 한다(3회차 교차검증). promotions가
     # new_rows 순서를 그대로 담아, 같은 두 승격의 행 순서만 뒤집혀도 지문이
     # 달라졌다 — 재실행 드리프트와 실제 변경을 구별할 수 없게 만든다.
+    # 지문은 **상태 전이 전체**에 결속한다(v3). risks는 사람이 읽는 요약이고,
+    # 승인이 묶여야 하는 것은 「이 코퍼스에서 저 코퍼스로」라는 사실 자체다.
+    # 위험이 없으면 지문도 없다 — 승인 절차 자체가 열리지 않기 때문이다.
     canonical = json.dumps(
-        sorted(risks, key=lambda r: json.dumps(r, ensure_ascii=False, sort_keys=True)),
+        {"v": FINGERPRINT_VERSION,
+         "prev": _state_digest(prev_rows, prev_cur),
+         "new": _state_digest(new_rows, new_cur),
+         "risks": sorted(risks, key=lambda r: json.dumps(
+             r, ensure_ascii=False, sort_keys=True))},
         ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
     return {

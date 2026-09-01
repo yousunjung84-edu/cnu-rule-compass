@@ -164,6 +164,58 @@ class ChangeGateCurrentTest(unittest.TestCase):
         self.assertIsNotNone(two)
         self.assertNotEqual(one, two, "다른 변경인데 같은 지문 — 승인이 재사용된다")
 
+    def test_지문은_상태_전이_전체에_결속된다(self):
+        """★ 5회차 교차검증 반례 4종 — 지문을 risks에서 뽑으면 전부 충돌했다.
+
+        항목마다 필드를 덧붙이는 방식으로는 계속 샜다. 「무엇을 위험으로
+        부르는가」와 「무엇이 바뀌었는가」는 다른 질문이고, 승인은 후자에
+        결속돼야 한다. 여기서 각 축이 실제로 지문을 가르는지 고정한다.
+        """
+        def fp(prev, new, pm, nm):
+            return change_gate.change_report(prev, new, pm, nm)["fingerprint"]
+
+        base = [_row("a"), _row("b", art="제2조")]
+        both = {"a": True, "b": True}
+        cases = {
+            # 중복 정리 — lost_ids·demoted_ids가 둘 다 비어 같은 지문이었다.
+            "중복정리": (fp([_row("a"), _row("a")], [_row("a")], {"a": True}, {"a": True}),
+                       fp([_row("b"), _row("b")], [_row("b")], {"b": True}, {"b": True})),
+            # 개명 — 규정명이 {**new, **prev}라 늘 이전 이름이었다.
+            "개명 대상": (fp(base, [_row("a", name="NEW-1"), _row("b", art="제2조")],
+                          both, {"a": False, "b": True}),
+                       fp(base, [_row("a", name="NEW-2"), _row("b", art="제2조")],
+                          both, {"a": False, "b": True})),
+            # 개명 유무 자체 — 생존 변이(규정명만 지문에서 빼기)가 여기서 죽는다.
+            "개명 유무": (fp(base, [_row("a", name="NEW-1"), _row("b", art="제2조")],
+                          both, {"a": False, "b": True}),
+                       fp(base, [_row("a"), _row("b", art="제2조")],
+                          both, {"a": False, "b": True})),
+            # 등장 횟수 — 위험은 같고 **중복 개수만** 다른 두 change-set.
+            # (risks가 담지 않는 축이라 상태 요약에만 실린다)
+            "중복 개수": (fp([_row("a"), _row("a"), _row("x", key="K2")],
+                          [_row("a"), _row("a")],
+                          {"a": True, "x": True}, {"a": True}),
+                       fp([_row("a"), _row("x", key="K2")], [_row("a")],
+                          {"a": True, "x": True}, {"a": True})),
+            # 현행성 — 위험은 같고 **변화 없는 레코드의 현행성만** 다른 두 경우.
+            "무변화 현행성": (fp([_row("a"), _row("c", key="K3")],
+                             [_row("a"), _row("c", key="K3")],
+                             {"a": False, "c": True}, {"a": True, "c": True}),
+                          fp([_row("a"), _row("c", key="K3")],
+                             [_row("a"), _row("c", key="K3")],
+                             {"a": False, "c": False}, {"a": True, "c": False})),
+            # 승격 — current_promotion에 source_key가 없었다.
+            "승격 규정": (fp([_row("a", key="K1")], [_row("a", key="K1")],
+                          {"a": False}, {"a": True}),
+                       fp([_row("a", key="K2")], [_row("a", key="K2")],
+                          {"a": False}, {"a": True})),
+        }
+        for label, (one, two) in cases.items():
+            with self.subTest(label):
+                self.assertIsNotNone(one)
+                self.assertNotEqual(one, two,
+                                    f"{label}이 다른데 같은 지문 — 승인이 재사용된다")
+
     def test_조문_통합은_current_drop으로_구분된다(self):
         """구판 2조문을 신판 1개 통합 조문이 대체하는 정상 개정 — 교차검증 #6.
 
