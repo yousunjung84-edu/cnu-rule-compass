@@ -21,6 +21,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urljoin, urlparse
 from urllib.request import Request, urlopen
 
+from kordoc_bin import kordoc_command, kordoc_env
+
 
 LIST_URL = "https://www.jnu.ac.kr/WebApp/web/HOM/COM/Rule/AdminRule400.aspx"
 USER_AGENT = "Mozilla/5.0"
@@ -257,9 +259,10 @@ def download_with_retry(
 
 
 def run_kordoc(hwp_path: Path, md_path: Path, timeout: int = 120) -> str:
-    command = ["kordoc", str(hwp_path), "-o", str(md_path)]
+    command = kordoc_command(hwp_path, md_path)
     completed = subprocess.run(
         command,
+        env=kordoc_env(),
         check=False,
         capture_output=True,
         text=True,
