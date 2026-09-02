@@ -24,6 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from src.search import prepare_article  # noqa: E402
+from collect_rules import _UNDERLINE_TAG  # noqa: E402  # 조문 경로와 같은 밑줄 제거 규칙
 
 CORPUS = ROOT / "data" / "rules_corpus.json"
 MARKDOWN = ROOT / "data" / "markdown"
@@ -68,6 +69,7 @@ def extract(text: str) -> list[tuple[str, str, str]]:
         start = header.end()
         end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
         body = text[start:end].strip()
+        body = _UNDERLINE_TAG.sub("", body)   # kordoc 4.12.0 밑줄 태그 — 조문 경로와 같은 세대로(code-review #7)
         inline = header.group("inline").strip().lstrip("#").strip()
         # 제목 뒤 개정 표기 '<개정 2025. 2. 17.>'는 마크업이므로 제목에서 뺀다
         # (본문은 건드리지 않는다 — 표시용 제목만 다듬는다).

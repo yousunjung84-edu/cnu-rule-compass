@@ -32,6 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from src.search import prepare_article  # noqa: E402
+from collect_rules import _UNDERLINE_TAG  # noqa: E402  # 조문 경로와 같은 밑줄 제거 규칙
 
 CORPUS = ROOT / "data" / "rules_corpus.json"
 MARKDOWN = ROOT / "data" / "markdown"
@@ -57,6 +58,7 @@ def extract(text: str) -> list[tuple[str, str, str]]:
     for index, match in enumerate(sequence):
         end = sequence[index + 1].start() if index + 1 < len(sequence) else len(text)
         body = text[match.end():end].strip()
+        body = _UNDERLINE_TAG.sub("", body)   # kordoc 4.12.0 밑줄 태그 — 조문 경로와 같은 세대로(code-review #7)
         if not body:
             continue
         title = " ".join(match.group("title").split())
