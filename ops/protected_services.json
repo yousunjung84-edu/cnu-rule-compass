@@ -1,0 +1,50 @@
+{
+  "_about": [
+    "Cloud Run 서비스의 운영 등급과 기대 설정을 기계판독으로 박제한 선언 파일이다.",
+    "왜 있는가: 지금까지 이 정보는 사람이 읽는 스크립트 주석에만 있었고, 주석을 안 읽은",
+    "세션이 설정을 되돌린 사고가 실제로 있었다(2026-08-18). 선언을 파일로 옮겨",
+    "scripts/service_drift_check.sh 가 매일 대조하게 한다.",
+    "",
+    "한계: 박사 계정이 프로젝트 owner라 IAM 으로 변경 자체를 막을 수는 없다.",
+    "이 파일은 '차단'이 아니라 '선언 + 빠른 탐지' 장치다. 진짜 강제가 필요해지면",
+    "프로젝트 분리로 간다(보류 결정: 2026-09-02, 재검토 트리거는 vault 노트 참고).",
+    "",
+    "값을 바꿀 때: 실제 설정을 먼저 바꾸고 이 파일을 맞추는 게 아니라,",
+    "이 파일을 먼저 고치고(=결정을 남기고) 설정을 바꾼다."
+  ],
+  "project": "academyinfo-mcp-2026",
+  "region": "asia-northeast3",
+  "baseline_captured": "2026-09-02",
+
+  "services": {
+    "cnu-rule-compass": {
+      "tier": "production",
+      "note": "교무과 대면 운영 서비스. AIONI 커넥터로 각 담당자가 URL을 직접 등록해 두었으므로 URL 변경 시 전원이 각자 재설정해야 한다 — 사실상 변경 불가.",
+      "expect": {
+        "min_instances": "1",
+        "cpu": "2",
+        "memory": "2Gi",
+        "tags_allowed": false
+      },
+      "why_min_instances": "콜드스타트 p50 61.4초 실측(2026-09-02). 대면 서비스라 허용 불가."
+    },
+    "academyinfo-mcp": {
+      "tier": "public",
+      "note": "개인 오픈소스. npm 패키지(stdio)와 MCP 레지스트리 공개 엔드포인트.",
+      "expect": {
+        "min_instances": "0",
+        "cpu": "1",
+        "memory": "512Mi",
+        "tags_allowed": false
+      },
+      "why_min_instances": "콜드스타트 p50 1.1초 실측(2026-09-02). 상시 가동 근거 없음."
+    }
+  },
+
+  "default_tier": "experimental",
+  "experimental_expect": {
+    "min_instances": "0",
+    "tags_allowed": false,
+    "_note": "실험 등급은 cpu/memory 를 고정하지 않는다(조정이 잦아 경보만 시끄러워진다). 상시 과금으로 이어지는 min_instances 와 상주 태그만 본다."
+  }
+}
