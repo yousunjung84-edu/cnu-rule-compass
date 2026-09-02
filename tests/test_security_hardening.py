@@ -271,10 +271,6 @@ class LineageAvailabilityTest(unittest.TestCase):
         self.assertIn("RULE_COMPASS_DATA_DIR", r["hint"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class UsageLogPrivacyTest(unittest.TestCase):
     """익명 사용 집계에 질의 원문이 섞이면 안 된다 (2026-08-28, 박사 확정 (나)안).
 
@@ -365,3 +361,7 @@ class UsageLogPrivacyTest(unittest.TestCase):
             else:
                 os.environ["RULECOMPASS_USAGE_LOG"] = previous
         self.assertEqual("", buffer.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()
