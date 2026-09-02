@@ -340,6 +340,18 @@ def _finish(report: dict, before: dict, changed: bool | None = None) -> int:
         #
         # 그래서 배포 후에는 **health의 수치**로 확인한다. 메시지·종료코드가
         # 아니라 서비스가 실제로 무엇을 내놓는지가 증거다.
+        #
+        # ⚠️⚠️ 검증용 리비전을 따로 띄울 때 --min-instances=1 을 딸려 보내지 말 것
+        # (2026-09-02 비용 사고). min-instances는 **리비전에 저장**되고, **태그가
+        # 붙은 리비전은 트래픽 0%여도 "참조 중"이라 종료되지 않는다.** 즉
+        #     gcloud run deploy ... --min-instances=1 --no-traffic --tag=vXXX
+        # 는 검증 1회당 상시 인스턴스 1개를 영구 적립한다(2vCPU/2GiB 상시면 월 약 5만원).
+        # 반복하면 그만큼 쌓이고, 태그를 떼기 전까지 줄지 않는다.
+        #
+        # 검증 배포는 아래를 쓰고, 끝나면 태그를 뗀다:
+        #     scripts/revision_tag_guard.sh deploy <svc> <image> <tag>   # min-instances=0 강제
+        #     scripts/revision_tag_guard.sh audit                        # 누수 상시 감사
+        # (위 report["배포_명령"]의 --min-instances=1 은 *운영* 리비전 정책이라 유효하다.)
         report["배포_후_확인"] = (
             "curl -s https://cnu-rule-compass-433006350023.asia-northeast3.run.app/health "
             f"# articles가 {after['조문']}건 아니면 트래픽이 안 옮겨간 것이다. "

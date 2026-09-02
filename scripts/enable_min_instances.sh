@@ -1,15 +1,22 @@
 #!/bin/bash
-# 8/18 시상식 시연 대비 — Cloud Run 상시 가동(min-instances=1) 재점등 1회성 잡.
-# 미적용 시 유휴 후 첫 질의가 약 7초 지연된다(2026-07-26 실측).
-# 실행 후 스스로 plist를 제거해 이듬해 재발화를 막는다.
-# 원복: gcloud run services update <svc> ... --min-instances 0
+# Cloud Run 상시 가동(min-instances=1) 재점등 잡 — 원래 8/18 시상식 시연 대비 1회성.
+# 실행 후 스스로 plist를 제거해 재발화를 막는다.
+#
+# ⚠️ 2026-09-02 박사 확정으로 **대상이 cnu-rule-compass 하나로 축소**됐다.
+#    academyinfo-mcp 는 min-instances=0 이 정책이다 — 아래에 넣지 말 것.
+#
+#    근거(2026-09-02 실측): 콜드스타트 p50 이 academyinfo 1.1초 / cnu 61.4초로 갈린다.
+#    academyinfo 는 1.1초면 상시 가동이 필요 없다. cnu 는 AIONI 커넥터 대면 서비스라
+#    61초 콜드스타트가 서비스 불가 수준이므로 유지한다.
+#
+# 원복: gcloud run services update cnu-rule-compass ... --min-instances 0
 
 set -u
 
 GCLOUD=/opt/homebrew/bin/gcloud
 PROJECT=academyinfo-mcp-2026
 REGION=asia-northeast3
-SERVICES=(cnu-rule-compass academyinfo-mcp)
+SERVICES=(cnu-rule-compass)   # academyinfo-mcp 제외 — min=0 정책(2026-09-02 박사 확정)
 LABEL=com.yuseon.rulecompass-minscale
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/rulecompass-build/data/min_instances_job.log"
