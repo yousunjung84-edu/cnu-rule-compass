@@ -298,6 +298,36 @@ class ChangeGateCurrentTest(unittest.TestCase):
                 stuck.append(name)
         self.assertEqual([], sorted(stuck)[:10], f"{len(stuck)}건이 단독 계열로 남는다")
 
+    def test_형제_key의_상쇄로_한_key의_현행_전멸이_가려지지_않는다(self):
+        """code-review #5 (2026-09-02). 같은 규정명의 key A·B — A 전멸, B는 새 현행
+        유입. 계열 합계 4→4라 종전엔 위험 0건·지문 없음으로 채택됐다."""
+        N = "전남대학교 공동지도교수제 시행 지침"
+        prev = [_row("a1", key="2826", name=N), _row("a2", key="2826", name=N, art="제2조"),
+                _row("b1", key="3670", name=N), _row("b2", key="3670", name=N, art="제2조")]
+        new = prev + [_row("b3", key="3670", name=N, art="제3조"),
+                      _row("b4", key="3670", name=N, art="제4조")]
+        ok, report = change_gate.guard(
+            prev, new,
+            prev_current={"a1": True, "a2": True, "b1": True, "b2": True},
+            new_current={"a1": False, "a2": False, "b1": True, "b2": True,
+                         "b3": True, "b4": True})
+        self.assertFalse(ok, "규정 2826이 현행 0건인데 채택됐다")
+        hits = [r for r in report["risks"] if r["type"] == "current_article_loss"
+                and r.get("source_key") == "2826"]
+        self.assertEqual(1, len(hits), report["risks"])
+        self.assertEqual("current_zero", hits[0]["severity"])
+        self.assertEqual(["a1", "a2"], hits[0]["demoted_ids"])
+        self.assertIsNotNone(report["fingerprint"])
+
+    def test_신판이_새_key로_오면_구판_key_전멸은_정상이다(self):
+        """#5 가드가 정상 개정(355건 실측)을 다시 잡으면 안 된다 — 후속 key 판정."""
+        prev = [_row("a", key="5043")]
+        new = [_row("a", key="5043", name=_OLD), _row("b", key="5063")]
+        ok, report = change_gate.guard(prev, new, prev_current={"a": True},
+                                       new_current={"a": False, "b": True})
+        self.assertTrue(ok)
+        self.assertEqual([], [r for r in report["risks"] if r["type"] == "current_article_loss"])
+
     def test_조문_통합은_current_drop으로_구분된다(self):
         """구판 2조문을 신판 1개 통합 조문이 대체하는 정상 개정 — 교차검증 #6.
 

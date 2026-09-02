@@ -24,7 +24,7 @@ from collections import Counter
 # 지문 산식 버전. 위험 항목의 필드나 canonical 정렬이 바뀌면 올린다 —
 # 옛 승인이 안 맞는 이유가 「재실행 드리프트」인지 「포맷 변경」인지
 # 사용자가 구별할 수 있어야 한다.
-FINGERPRINT_VERSION = 4
+FINGERPRINT_VERSION = 5   # v5: 형제 key 상쇄 마스킹 제거(code-review #5) — 위험 산식 변경
 
 
 def _per_rule(rows: list[dict]) -> dict[str, int]:
@@ -346,6 +346,37 @@ def change_report(prev_rows: list[dict], new_rows: list[dict],
                                    else "current_drop",
                        "demoted_ids": sorted(demoted_by_lin.get(k, []))}
                       for k in sorted(pcc) if ncc.get(k, 0) < pcc[k]]
+    # ★ 계열 합계만 보면 **형제 key의 상쇄**에 가려진다 (2026-09-02 code-review #5).
+    #
+    # 같은 규정명을 가진 key가 둘일 때(실측: 2826·3670 「전남대학교 공동지도교수제
+    # 시행 지침」 각 5조문) 한쪽의 현행이 전멸해도 다른 쪽이 새 현행 행을 얻으면
+    # 계열 합계가 그대로라 위험 0건·지문 없음으로 배포된다 — 규정 하나가 현행
+    # 0건인 채로. 정상 개정과의 차이는 **신판이 새 key로 들어왔는가**다(이 학교는
+    # 개정 시 신판에 새 key를 준다). 전멸한 key의 계열에 prev에 없던 key가 현행을
+    # 갖고 나타났으면 정상 개정이고, 아니면 그 key의 소실을 따로 올린다.
+    pck, nck = (_current_per_rule(prev_rows, prev_current),
+                _current_per_rule(new_rows, new_current))
+    new_names = _names(new_rows)
+    successors: dict[str, set[str]] = {}
+    for key, n in nck.items():
+        if n > 0 and key not in pc:
+            successors.setdefault(lineage_of(new_names.get(key, "")), set()).add(key)
+    flagged = {l["계열"] for l in current_losses if l["severity"] == "current_zero"}
+    demoted_by_key: dict[str, list[str]] = {}
+    for r in prev_rows:
+        rid = str(r.get("record_id", ""))
+        if rid and prev_cur.get(rid) and not new_cur.get(rid, False):
+            demoted_by_key.setdefault(str(r.get("source_key")), []).append(rid)
+    for key in sorted(pck):
+        if pck[key] == 0 or nck.get(key, 0) > 0:
+            continue
+        lin = lineage_of(names.get(key, ""))
+        if lin in flagged or successors.get(lin):
+            continue                        # 계열 단위로 이미 잡혔거나, 신판이 새 key로 왔다
+        current_losses.append({"계열": lin, "source_key": key,
+                               "before": pck[key], "after": 0,
+                               "severity": "current_zero",
+                               "demoted_ids": sorted(demoted_by_key.get(key, []))})
     # 개명은 위험이 아니라 참고 변화 — 다만 보고서에는 반드시 남긴다.
     renames = _renames(prev_rows, new_rows)
     risks = ([{"type": "article_loss", **l} for l in losses]
