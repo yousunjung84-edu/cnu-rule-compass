@@ -314,10 +314,17 @@ def attachment_cut(markdown: str) -> int:
 
     문서 **첫머리**의 표식은 경계가 아니다 — 그 문서 자신이 다른 문서의 붙임으로
     배포됐다는 표지다(코어에서 충남대 「계약심의회 운영 지침」으로 확인).
-    앞에 조문이 하나도 없으면 자르지 않는다.
+    앞에 **내용**이 하나도 없으면 자르지 않는다.
+
+    ★ 조건은 코어(collect_school_gazette.attachment_cut)와 같은 「내용이 먼저
+    나왔는가」다(2026-09-02 code-review #6). 백포트 때 「조문(제N조)이 먼저
+    나왔는가」로 좁혀 옮겼는데, 그러면 본칙이 항목식(1. 목적 …)이라 조문이 없는
+    문서 뒤에 붙은 서식의 제1~8조가 잘리지 않고 규정 조문으로 수확된다 — 코어가
+    부산대 「계약학과 운영지침」에서 실측한 바로 그 사고(서식 조문 38건). 캐시
+    637건 실측: 절단점이 달라지는 문서 8건 전부 항목식, 사이 조문 0건.
     """
     for match in _ATTACHMENT_MARK.finditer(markdown):
-        if ARTICLE_RE.search(markdown[:match.start()]):
+        if markdown[:match.start()].strip():
             return match.start()
     return len(markdown)
 
