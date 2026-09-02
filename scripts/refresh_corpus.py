@@ -37,6 +37,8 @@ CORPUS = ROOT / "data" / "rules_corpus.json"
 SNAPSHOT = ROOT / "data" / "listing_snapshot_latest.json"
 LOG = ROOT / "data" / "corpus_refresh.log"
 REPORT = ROOT / "data" / "corpus_refresh_report.json"
+CANDIDATE = CORPUS.with_suffix(".json.candidate")      # 승인 대기 중인 새 코퍼스
+PENDING = ROOT / "data" / "pending_change_report.json"  # 승인 대기 change-set 보고서
 
 
 def log(msg: str) -> None:
@@ -134,12 +136,72 @@ def reconcile_names() -> dict:
             "목록_소실_목록": missing_keys}
 
 
+def _adopt_candidate(fingerprint: str) -> int:
+    """--approve <fp>: 보존된 후보를 **재수집 없이** 채택한다 (2026-09-02 code-review #2).
+
+    종전엔 --approve가 수집 7단계를 전부 다시 돌렸다. 그 사이 게시가 하나만
+    바뀌어도 _state_digest가 달라져 새 지문이 나오고, 운영자가 검토한 지문은
+    거부됐다 — 몇 시간을 다시 태우고 코퍼스는 이전 스냅샷에 고정됐다. 승인은
+    **검토한 그 후보**에 결속돼야 한다. 현재 코퍼스(실패 시 원복된 상태)를
+    prev, 후보를 new로 놓고 같은 게이트를 다시 재서 지문이 맞을 때만 올린다.
+    """
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import change_gate
+
+    started = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    log(f"=== 승인 채택 시작 — 후보 {CANDIDATE.name}, 지문 {fingerprint} (재수집 없음) ===")
+    before = corpus_summary()
+    report: dict = {"시작": started, "이전": before, "모드": "candidate_adopt",
+                    "대사": {"개명": 0, "목록_소실": 0}}
+    prev_rows = json.loads(CORPUS.read_text(encoding="utf-8"))
+    new_rows = json.loads(CANDIDATE.read_text(encoding="utf-8"))
+    ok, change = change_gate.guard(
+        prev_rows, new_rows, approve=fingerprint,
+        prev_current=build_current_map(CORPUS, prev_rows),
+        new_current=build_current_map(CANDIDATE, new_rows))
+    report["change_gate"] = {k: change[k] for k in
+                             ("requires_approval", "fingerprint", "current_source",
+                              "blocked", "fingerprint_version")}
+    if change["blocked"]:
+        log("[승인 거부] change-gate 차단 상태 — 어떤 승인으로도 채택 불가: "
+            + "; ".join(b["type"] for b in change["blockers"]))
+        return 1
+    if not ok:
+        # 후보는 그대로 둔다 — 지문이 안 맞는 이유(코퍼스가 그 사이 바뀜, 잘못 옮긴
+        # 지문)를 사람이 봐야지, 후보를 지우면 검토한 내용이 사라진다.
+        log(f"[승인 거부] 지문 불일치 — 후보 change-set {change['fingerprint']}, "
+            f"받은 값 {fingerprint}. 후보 보존")
+        report["결과"] = f"승인 거부·지문 불일치 ({change['fingerprint']} ≠ {fingerprint})"
+        REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        return 1
+    backup = CORPUS.with_suffix(".json.refresh-backup")
+    shutil.copy2(CORPUS, backup)
+    shutil.copy2(CANDIDATE, CORPUS)
+    gate = run([PY, "-m", "unittest", "discover", "-s", "tests", "-t", "."], timeout=1800)
+    tail = (gate.stderr or gate.stdout).strip().splitlines()[-1] if (gate.stderr or gate.stdout) else ""
+    report["테스트"] = tail
+    if gate.returncode != 0:
+        shutil.copy2(backup, CORPUS)
+        report["결과"] = f"실패·원복: 테스트 게이트 실패: {tail}"
+        REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        log(f"[실패] 테스트 게이트 실패: {tail} — 코퍼스 원복, 후보 보존")
+        return 1
+    log(f"[게이트] {tail}")
+    log(f"[change-gate] 승인 확인 {fingerprint} — 위험 {len(change['risks'])}건 채택")
+    report["대사"]["개명"] = len(change["renames"])
+    return _finish(report, before, changed=True)
+
+
 def main() -> int:
     import argparse
     ap = argparse.ArgumentParser(description="코퍼스 월간 갱신")
     ap.add_argument("--approve", metavar="FINGERPRINT", default=None,
                     help="pending change-set의 fingerprint를 승인 (change_gate)")
     cli = ap.parse_args()
+    if cli.approve and CANDIDATE.exists():
+        return _adopt_candidate(cli.approve)
+    if cli.approve:
+        log("[승인] 보존된 후보가 없다 — 전체 재수집으로 진행 (지문은 이번 change-set과 대조)")
     started = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     log("=== 코퍼스 갱신 시작 ===")
     before = corpus_summary()
@@ -196,7 +258,7 @@ def main() -> int:
             log(f"[change-gate] 개명 {len(change['renames'])}건 (위험 아님, 보고서 기록)")
         if change["blocked"]:
             # 승인으로 넘길 수 없는 상태 — 지문도 없다. 배선이 깨졌다는 뜻이다.
-            (ROOT / "data" / "pending_change_report.json").write_text(
+            PENDING.write_text(
                 json.dumps(change, ensure_ascii=False, indent=2), encoding="utf-8")
             raise RuntimeError(
                 "change-gate 차단: " + "; ".join(
@@ -204,15 +266,14 @@ def main() -> int:
                 + " — 현행 판정이 성립하지 않아 어떤 승인으로도 채택할 수 없다. "
                   "current_map 배선을 확인할 것")
         if change["requires_approval"]:
-            (ROOT / "data" / "pending_change_report.json").write_text(
+            PENDING.write_text(
                 json.dumps(change, ensure_ascii=False, indent=2), encoding="utf-8")
         if not ok:
-            candidate = CORPUS.with_suffix(".json.candidate")
-            shutil.copy2(CORPUS, candidate)
+            shutil.copy2(CORPUS, CANDIDATE)
             raise RuntimeError(
                 f"change-set 승인 필요 (fingerprint {change['fingerprint']}, "
-                f"위험 {len(change['risks'])}건) — 후보는 {candidate.name}에 보존, "
-                f"검토 후 --approve {change['fingerprint']} 로 재실행")
+                f"위험 {len(change['risks'])}건) — 후보는 {CANDIDATE.name}에 보존, "
+                f"검토 후 --approve {change['fingerprint']} 로 재실행 (재수집 없이 후보를 채택)")
         if change["requires_approval"]:
             log(f"[change-gate] 승인 확인 {change['fingerprint']} — 위험 {len(change['risks'])}건 채택")
         else:
@@ -230,8 +291,21 @@ def main() -> int:
             capture_output=True)
         return 1
 
+    return _finish(report, before)
+
+
+def _finish(report: dict, before: dict, changed: bool | None = None) -> int:
+    """채택 뒤 공통 마무리 — 요약·배포 명령·보고서. 채택됐으므로 후보·대기 보고서를 지운다.
+
+    changed를 주면 그대로 쓴다. 후보 채택은 조문·규정 수가 그대로여도(9/1처럼
+    강등만 있는 change-set) 코퍼스가 바뀐 것이므로 「변경 없음·배포 불필요」로
+    떨어지면 안 된다.
+    """
+    for stale in (CANDIDATE, PENDING):
+        stale.unlink(missing_ok=True)
     after = corpus_summary()
-    changed = after != before or report["대사"]["개명"] > 0
+    if changed is None:
+        changed = after != before or report["대사"]["개명"] > 0
     report["이후"] = after
     report["변경"] = {"조문": after["조문"] - before["조문"], "규정": after["규정"] - before["규정"]}
     if changed:
