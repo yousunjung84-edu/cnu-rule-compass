@@ -119,6 +119,28 @@ class ChangeGateCurrentTest(unittest.TestCase):
         self.assertTrue(ok)
         self.assertFalse(report["blocked"])
 
+    def test_위치_메타만_다른_중복ID는_차단하지_않는다(self):
+        """code-review #8 (2026-09-02). 장/절·수집일시·source_url은 record_id가
+        덮지 않는 필드다 — 그것만 다른 쌍둥이로 매 재수집이 막히면 안 된다."""
+        a = {**_row("a"), "장": "제1장", "절": None, "수집일시": "2026-09-01", "source_url": "u1"}
+        b = {**_row("a"), "장": "제2장", "절": "제1절", "수집일시": "2026-09-02", "source_url": "u2"}
+        ok, report = change_gate.guard([a], [a, b], prev_current={"a": True},
+                                       new_current={"a": True})
+        self.assertFalse(report["blocked"], report["blockers"])
+        self.assertTrue(ok)
+
+    def test_내용이_다른_중복ID는_여전히_차단한다(self):
+        a = _row("a"); b = {**_row("a"), "본문": "다른 본문"}
+        _, report = change_gate.guard([a], [a, b], prev_current={"a": True},
+                                      new_current={"a": True})
+        self.assertTrue(report["blocked"])
+        self.assertIn("record_id_conflict", [x["type"] for x in report["blockers"]])
+        # 규정명이 갈리면 현행성을 정할 수 없다 — 내용으로 본다
+        c = {**_row("a"), "규정명": "다른 규정"}
+        _, report = change_gate.guard([a], [a, c], prev_current={"a": True},
+                                      new_current={"a": True})
+        self.assertTrue(report["blocked"])
+
     def test_차단_상태는_어떤_승인으로도_통과하지_못한다(self):
         prev = [_row("a")]
         new = [_row("a", name="R (2026. 8. 19. 개정전)")]

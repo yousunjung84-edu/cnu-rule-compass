@@ -167,6 +167,16 @@ def _state_digest(rows: list[dict], current: dict[str, bool]) -> str:
     ).hexdigest()
 
 
+# record_id 산식의 재료(source_key|조문번호|record_type|조문제목|본문)에 규정명을
+# 더한 것. 규정명은 ID에 없지만 src/search.py가 현행성을 규정명 표기로 정하므로
+# 쌍둥이의 규정명이 다르면 「어느 쪽 현행성인가」를 정할 수 없다.
+_CONTENT_FIELDS = ("source_key", "조문번호", "record_type", "조문제목", "본문", "규정명")
+
+
+def _content(row: dict) -> tuple:
+    return tuple(str(row.get(k, "")) for k in _CONTENT_FIELDS)
+
+
 def _blockers(prev_rows: list[dict], new_rows: list[dict],
               prev_current: dict[str, bool] | None,
               new_current: dict[str, bool] | None) -> list[dict]:
@@ -214,6 +224,12 @@ def _blockers(prev_rows: list[dict], new_rows: list[dict],
         #
         # 차단할 것은 **내용이 다른 중복**이다. 그때는 어느 쪽 현행성인지
         # 정할 수 없고, ID 산식이 깨졌다는 신호이기도 하다.
+        # ★ 「내용」은 record_id가 덮는 필드 + 현행성을 정하는 규정명이다
+        # (2026-09-02 code-review #8). 행 dict 전체를 비교하면 record_id가 덮지
+        # 않는 위치·메타 필드(장/절·수집일시·source_url)만 달라도 차단된다 —
+        # 장/절은 문서 순서로 이어 붙이는 값이라 중복 블록이 장 표제를 사이에
+        # 두면 갈린다(장/절 있는 행 10,739). 차단은 승인으로 못 넘기므로 그때는
+        # 코퍼스를 손으로 고칠 때까지 모든 재수집이 막힌다.
         groups: dict[str, list[dict]] = {}
         for r in rows:
             rid = str(r.get("record_id") or "").strip()
@@ -221,7 +237,7 @@ def _blockers(prev_rows: list[dict], new_rows: list[dict],
                 groups.setdefault(rid, []).append(r)
         conflict = sorted(
             rid for rid, rs in groups.items() if len(rs) > 1
-            and any(other != rs[0] for other in rs[1:]))
+            and any(_content(other) != _content(rs[0]) for other in rs[1:]))
         if conflict:
             out.append({"type": "record_id_conflict", "side": label,
                         "count": len(conflict), "sample": conflict[:5],
