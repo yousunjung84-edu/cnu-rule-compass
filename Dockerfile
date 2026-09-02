@@ -7,7 +7,10 @@ WORKDIR /app
 
 # 상한을 반드시 둔다: mcp 2.0.0은 mcp.server.fastmcp를 없애 서버가 기동하지 않는다
 # (2026-08-10 배포 실패로 확인). 검증 버전은 1.28.1.
-RUN pip install --no-cache-dir "mcp>=1.20,<2"
+# ★ 정확히 pin한다(2026-09-02, 드리프트감사 §E4). 범위 설치는 매 빌드가 다른 SDK를
+# 집어 「구조 전환」과 「SDK 변경」이 같은 배포에 섞인다 — 무엇이 깨졌는지 갈라낼 수
+# 없다. 1.29+ 호환 자체는 전송 게이트 wheel 축이 별도 venv로 확인한다.
+RUN pip install --no-cache-dir "mcp==1.28.1"
 
 COPY src ./src
 # 대학 프로필(정체성·허용 호스트·URL 키 파라미터·계층 임계). 없으면 기동 시 즉시
