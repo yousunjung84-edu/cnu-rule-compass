@@ -44,3 +44,7 @@ data/rules_corpus.json.refresh-backup
 data/listing_snapshot_latest.json
 data/corpus_refresh*.log
 data/corpus_refresh_report.json
+# 갱신 잡의 stdout/stderr와 코퍼스 사본(백업·후보·수동 스냅샷)은 로컬 전용
+data/corpus_refresh.out
+data/corpus_refresh.err
+data/rules_corpus.json.*
