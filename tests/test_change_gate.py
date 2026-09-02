@@ -252,6 +252,52 @@ class ChangeGateCurrentTest(unittest.TestCase):
             with self.subTest(name[:24]):
                 self.assertEqual(want, change_gate.lineage_of(name))
 
+    def test_계열_규칙은_search_py_강등_규칙과_같은_집합을_벗긴다(self):
+        """code-review #4 (2026-09-02). search.py가 구판으로 강등하는 이름을
+        lineage_of가 안 벗기면 단독 계열이 되어 정상 개정이 current_zero가 된다."""
+        cases = {
+            "2013~2014학년도 강사료 지급지침": "강사료 지급지침",
+            "2014~2015학년도 강사료 지급지침": "강사료 지급지침",
+            "2007년도 강사료 지급지침": "강사료 지급지침",
+            "전남대학교 병역 면제지침 (2020. 6. 9.)": "전남대학교 병역 면제지침",
+            "전남대학교 대학원생 권리장전(2016. 8. 26. 제정)": "전남대학교 대학원생 권리장전",
+            "전남대학교 X 규정 (2012)": "전남대학교 X 규정",
+            "전남대학교 Y 지침(2024. 1. 10. 개전전)": "전남대학교 Y 지침",   # 오탈자도 연도 꼬리
+            "2026": "2026",                                             # 이름 전체가 연도
+        }
+        for name, want in cases.items():
+            with self.subTest(name[:24]):
+                self.assertEqual(want, change_gate.lineage_of(name))
+
+    def test_연도판_교체는_위험이_아니다(self):
+        """실코퍼스 시뮬레이션(code-review #4): 다음 학년도판이 들어오며 구판이
+        강등 — 계열이 같으므로 current_article_loss가 아니어야 한다."""
+        old, new_ed = "2013~2014학년도 강사료 지급지침", "2014~2015학년도 강사료 지급지침"
+        prev = [_row("a", key="1", name=old)]
+        new = [_row("a", key="1", name=old), _row("b", key="2", name=new_ed)]
+        ok, report = change_gate.guard(prev, new, prev_current={"a": True},
+                                       new_current={"a": False, "b": True})
+        self.assertTrue(ok)
+        self.assertEqual([], [r for r in report["risks"]
+                              if r["type"] == "current_article_loss"])
+
+    def test_실코퍼스에서_search_py가_강등하는_이름은_전부_계열이_벗겨진다(self):
+        """두 모듈의 규칙 집합이 어긋나면 여기서 잡힌다 — 검토자가 쓴 방법 그대로."""
+        import json
+        corpus = Path(__file__).resolve().parents[1] / "data" / "rules_corpus.json"
+        if not corpus.exists():
+            self.skipTest("코퍼스 미수집 환경")
+        from src.search import _SUPERSEDED_NAME_RE, _YEAR_PREFIX_RE
+        names = {str(r.get("규정명", "")) for r in json.loads(corpus.read_text(encoding="utf-8"))}
+        stuck = []
+        for name in names:
+            m = _YEAR_PREFIX_RE.match(name)
+            year_prefixed = bool(m and name[m.end():].strip())
+            if (_SUPERSEDED_NAME_RE.match(name) or year_prefixed) \
+                    and change_gate.lineage_of(name) == name:
+                stuck.append(name)
+        self.assertEqual([], sorted(stuck)[:10], f"{len(stuck)}건이 단독 계열로 남는다")
+
     def test_조문_통합은_current_drop으로_구분된다(self):
         """구판 2조문을 신판 1개 통합 조문이 대체하는 정상 개정 — 교차검증 #6.
 

@@ -82,11 +82,35 @@ _ARCHIVE_SUFFIX = re.compile(
     r"\s*[.,]?\s*(?:개정전|이전)\s*[)）]?\s*$")
 
 
+# ★ search.py의 강등 규칙과 **같은 집합**을 벗긴다 (2026-09-02 code-review #4).
+#
+# lineage_of가 「(날짜 개정전|이전)」만 벗기는 동안 src/search.py는 더 넓게
+# 강등했다 — 꼬리 괄호에 제정/개정/폐지/이전이나 연도가 있으면 구판, 연도 접두
+# (「2007년도 …」「2013~2014학년도 …」)는 최신 연도판만 현행. 그 차집합(실측
+# 35 규정명)은 단독 계열이 되어 정상 개정에서 current_zero를 냈다 — 8e7bb71이
+# 없애려던 바로 그 거짓 양성. 아래 두 패턴은 search.py의 것을 그대로 옮긴 것이고,
+# 두 모듈의 일치는 tests/test_change_gate.py가 실코퍼스로 잠근다.
+_TAIL_NOTE = re.compile(
+    r"^(?P<base>.+?)\s*\((?P<note>"
+    r"[^)]*(?:제정|개정|폐지|이전)[^)]*"
+    r"|\s*\d{4}[^)]*"
+    r")\)\s*$")
+_YEAR_PREFIX = re.compile(
+    r"^\s*(?P<y1>(?:19|20)\d{2})\s*(?:[~\-.]\s*(?P<y2>\d{2,4}))?\s*(?:년도|학년도)?\s*")
+
+
 def lineage_of(name: str) -> str:
-    """규정명에서 아카이브 접미사를 벗겨 계열 이름을 얻는다."""
+    """규정명에서 판본 표기를 벗겨 계열 이름을 얻는다."""
     prev, cur = None, str(name).strip()
-    while prev != cur:                      # 접미사가 겹쳐 붙은 이름도 있다
-        prev, cur = cur, _ARCHIVE_SUFFIX.sub("", cur).strip()
+    while prev != cur:                      # 표기가 겹쳐 붙은 이름도 있다
+        prev = cur
+        cur = _ARCHIVE_SUFFIX.sub("", cur).strip()
+        m = _TAIL_NOTE.match(cur)
+        if m:
+            cur = m.group("base").strip()
+        m = _YEAR_PREFIX.match(cur)
+        if m and cur[m.end():].strip():     # 이름 전체가 연도뿐이면 판본 표기가 아니다
+            cur = cur[m.end():].strip()
     return cur
 
 
