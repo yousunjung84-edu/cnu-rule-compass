@@ -86,12 +86,43 @@ def tier_label(article: dict) -> str:
     return "규정" if regulation_tier(article) else "지침"
 
 
+# 용언 어미 (2026-09-06 박사 결정 — 코어 처방 A 이식, 백포트 동결 예외).
+#
+# 조사는 이미 환원됐는데 **활용형이 커버리지 분모를 채워** 관련성 게이트를
+# 무너뜨렸다. 「학사경고를 몇 번 받으면 제적되나요」가 0건이었다 —
+#   학사경고를 → 학사경고 환원, 매칭 ✓
+#   받으면     → 환원 없음, 매칭 ✗
+#   제적되나요  → 환원 없음, 매칭 ✗
+#   coverage 1/3 = 0.33 < 게이트 0.4  → 0건
+# 학칙 제54조가 현행으로 버젓이 있는데도 못 찾았다. 게이트 임계는 건드리지
+# 않는다 — 낮추면 무관 조문이 들어온다.
+#
+# ⚠️ core/search.py의 같은 표와 **글자 그대로 같아야 한다**. 다시 쓰다가
+# 조건이 좁아지는 것이 백포트가 만든 어긋남의 형태였다(9/2 code-review 3건).
+# tests/test_verb_ending_forms.py가 두 구현의 일치를 실코퍼스로 잠근다.
+_VERB_ENDINGS = tuple(sorted((
+    "되었나요", "되는지", "되나요", "됩니까", "됩니다", "되면", "되나",
+    "하는지", "하나요", "합니까", "합니다", "하여야", "하면", "해야",
+    "한가요", "할까요", "인가요", "입니까", "있나요", "없나요", "받나요",
+    "시나요", "나요", "는지",
+), key=len, reverse=True))     # 긴 어미부터 — '되나요'가 '나요'보다 먼저 걸려야 한다
+
+
 def _word_forms(word: str) -> set[str]:
-    """조사 차이를 완화한 단어형과 한국어 부분 일치용 2·3-gram을 만든다."""
+    """조사·용언 어미 차이를 완화한 단어형과 한국어 부분 일치용 2·3-gram을 만든다."""
     forms = {word}
     for suffix in _PARTICLES:
         if word.endswith(suffix) and len(word) - len(suffix) >= 2:
             forms.add(word[:-len(suffix)])
+            break
+    for suffix in _VERB_ENDINGS:
+        if word.endswith(suffix) and len(word) - len(suffix) >= 2:
+            stem = word[:-len(suffix)]
+            forms.add(stem)
+            for particle in _PARTICLES:      # '신청하려면' 같은 겹침도 받는다
+                if stem.endswith(particle) and len(stem) - len(particle) >= 2:
+                    forms.add(stem[:-len(particle)])
+                    break
             break
     if re.fullmatch(r"[가-힣]+", word):
         for size in (2, 3):
