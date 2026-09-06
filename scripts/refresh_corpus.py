@@ -62,7 +62,16 @@ def run(args: list[str], timeout: int = 3600) -> subprocess.CompletedProcess:
 # 전남대 배포본의 서비스 버전. 코어 엔진 버전(rule-compass-core)과 **다른 계보**다
 # — 같은 번호를 쓰면 /health만 보고 어느 배포본인지 구별할 수 없다.
 # 코퍼스 갱신 배포마다 올린다. 주입 경로는 위 배포_명령의 --update-env-vars.
-SERVICE_VERSION = "1.9.8"
+def _service_version() -> str:
+    """pyproject.toml [project].version 을 그대로 쓴다 — 리뷰(9/7)가 진본이 셋
+    (여기 상수·pyproject·Cloud Run env)이라 짚었다. 여기서 읽으면 둘로 준다.
+    env는 배포 명령이 이 값으로 채우므로 결국 하나다."""
+    import tomllib
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return str(data["project"]["version"])
+
+
+SERVICE_VERSION = _service_version()
 
 
 def corpus_summary() -> dict:

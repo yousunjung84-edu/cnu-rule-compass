@@ -125,7 +125,7 @@ def _get_article_fields(response: dict, bound: dict) -> dict:
     }
 
 
-def _bind(fn, args, kwargs) -> dict:
+def _bind(fn, args, kwargs, sig=None) -> dict:
     """호출 인자를 이름 기준으로 정규화한다.
 
     도구는 위치로도 키워드로도 불린다(MCP 클라이언트는 키워드, 테스트는 위치).
@@ -133,7 +133,7 @@ def _bind(fn, args, kwargs) -> dict:
     시그니처를 준다 — 래퍼의 (*args, **kwargs)가 아니다.
     """
     try:
-        bound = inspect.signature(fn).bind(*args, **kwargs)
+        bound = (sig or inspect.signature(fn)).bind(*args, **kwargs)
         bound.apply_defaults()
         return dict(bound.arguments)
     except TypeError:
@@ -150,6 +150,8 @@ def wrap(name: str, fn):
     if name not in LOGGED_TOOLS:
         return fn
 
+    sig = inspect.signature(fn)  # 시그니처는 wrap 시점에 고정 — 매 호출 reflection 불필요
+
     @functools.wraps(fn)  # ★ 빼면 FastMCP가 입력 스키마를 args/kwargs로 만든다
     def inner(*args, **kwargs):
         response = fn(*args, **kwargs)
@@ -158,7 +160,7 @@ def wrap(name: str, fn):
                 if name == "search_rule":
                     log_usage(name, **_search_fields(response))
                 else:
-                    bound = _bind(fn, args, kwargs)
+                    bound = _bind(fn, args, kwargs, sig)
                     # 바인딩이 안 되면 호출 인자를 모르는 것이다 — rule=""로 적느니
                     # 안 적는다(리뷰 지적: 성공 응답에 빈 식별자가 남던 경로).
                     if bound:
