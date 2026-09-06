@@ -1,7 +1,17 @@
 """CNU 규정 나침반 — 원격 MCP 진입점 (Streamable HTTP, Cloud Run 배포용).
 
-stdio 진입점(src/mcp_server.py)과 같은 도구 3종을 HTTP로 노출한다.
-claude.ai 커스텀 커넥터 등 원격 클라이언트가 `/mcp` 경로로 접속한다.
+★ 이 레포는 2026-09-07부터 **adapter**다 (코어 전환 P04).
+
+검색·조문·참조·정본대조 엔진은 전부 비공개 코어 패키지(rule-compass-core)가
+소유하고, 여기 남는 것은 전남대 배포본만의 관심사 셋뿐이다.
+
+  ① 사용집계        src/usage.py — 코어에 없다(2026-09-06 박사 결정 B).
+                    옮기면 확산 9개교까지 대상이 되는데 로그를 읽는 코드가
+                    아직 없어 Cloud Logging 비용만 는다.
+  ② 서비스 버전      RULE_COMPASS_SERVER_VERSION 환경변수(코어가 읽는다).
+  ③ 진입점·데이터    이 파일 + RULE_COMPASS_DATA_DIR(Dockerfile이 /app/data 주입).
+
+엔진 회귀 검사도 코어가 소유한다(369건). 여기 tests/는 adapter만 검사한다.
 
 - 공개 프로브는 `/health` 사용 — run.app 도메인은 Google Frontend가
   정확히 `/healthz` 경로를 가로채므로 쓰지 않는다(academyinfo 실측).
@@ -13,10 +23,12 @@ from __future__ import annotations
 import os
 import sys
 
-from src.mcp_server import (SERVER_VERSION, create_server,
-                            use_stdout_for_usage)
-from src.profile import active_profile
-from src.search import get_default_index
+from core.mcp_server import SERVER_VERSION, create_server
+from core.profile import active_profile
+from core.search import get_default_index
+
+from src.usage import use_stdout_for_usage
+from src.usage import wrap as usage_wrapper
 
 DEFAULT_PORT = 8080
 
@@ -54,7 +66,9 @@ def create_http_server():
             allowed_hosts=allowed_hosts,
             allowed_origins=[f"https://{host}" for host in allowed_hosts],
         )
-    server = create_server(**settings)
+    # 집계 훅을 코어 도구에 얹는다. 도구 **목록**은 코어가 소유하므로
+    # 코어에 도구가 늘어도 여기를 고치지 않아도 따라온다 (코어 0.6.1 _TOOLS).
+    server = create_server(tool_wrapper=usage_wrapper, **settings)
 
     from starlette.requests import Request
     from starlette.responses import JSONResponse

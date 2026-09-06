@@ -25,13 +25,17 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from src.search import prepare_article  # noqa: E402
+# ★ 코어(wheel 설치본)는 코퍼스를 RULE_COMPASS_DATA_DIR 에서 찾는다 — 없으면
+# site-packages 옆을 보고 못 찾는다(2026-09-07 P04). 명시 지정이 있으면 존중한다.
+os.environ.setdefault("RULE_COMPASS_DATA_DIR", str(ROOT / "data"))
+from core.search import prepare_article  # noqa: E402
 from collect_rules import _UNDERLINE_TAG  # noqa: E402  # 조문 경로와 같은 밑줄 제거 규칙
 
 CORPUS = ROOT / "data" / "rules_corpus.json"

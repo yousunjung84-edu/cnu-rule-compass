@@ -32,11 +32,14 @@ def actual_config(project, region, svc):
     ann = tpl["metadata"].get("annotations", {})
     lim = tpl["spec"]["containers"][0].get("resources", {}).get("limits", {})
     tags = [t["tag"] for t in d.get("status", {}).get("traffic", []) if t.get("tag")]
+    env = {e["name"]: e.get("value", "")
+           for e in tpl["spec"]["containers"][0].get("env", [])}
     return {
         "min_instances": ann.get("autoscaling.knative.dev/minScale", "0"),
         "cpu": lim.get("cpu", ""),
         "memory": lim.get("memory", ""),
         "tags": tags,
+        "env": env,
     }
 
 
@@ -67,6 +70,16 @@ def main():
                 continue  # 실험 등급은 cpu/memory 미고정
             if act[key] != want:
                 drift.append(f"  ⚠️ {svc} [{tier}] {key}: 선언={want} / 실제={act[key]}")
+
+        # env_required — **값이 아니라 존재**를 본다 (2026-09-07, 코어 전환 P04).
+        # 왜 생겼나: adapter 전환 뒤 서비스 버전은 하드코딩이 아니라 환경변수로
+        # 온다. 검증 배포에서 이 변수를 빠뜨렸더니 /health가 코어 엔진 버전
+        # 0.6.1을 말했다 — 커넥터를 등록한 담당자들이 보는 번호의 계보가 끊긴다.
+        # 빌드는 통과하고 서버도 정상 기동하므로 **아무도 못 잡는 종류**다.
+        for name in expect.get("env_required", []):
+            if not act["env"].get(name):
+                drift.append(f"  ⚠️ {svc} [{tier}] 필수 환경변수 없음: {name}"
+                             f" — 이미지 기본값이 그대로 노출된다")
 
         if not expect.get("tags_allowed", False) and act["tags"]:
             drift.append(f"  ⚠️ {svc} [{tier}] 상주 태그 발견: {', '.join(act['tags'])}"

@@ -28,10 +28,14 @@ import datetime
 import json
 import shutil
 import subprocess
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# ★ 코어(wheel 설치본)는 코퍼스를 RULE_COMPASS_DATA_DIR 에서 찾는다 — 없으면
+# site-packages 옆을 보고 못 찾는다(2026-09-07 P04). 명시 지정이 있으면 존중한다.
+os.environ.setdefault("RULE_COMPASS_DATA_DIR", str(ROOT / "data"))
 PY = str(ROOT / ".venv" / "bin" / "python")
 CORPUS = ROOT / "data" / "rules_corpus.json"
 SNAPSHOT = ROOT / "data" / "listing_snapshot_latest.json"
@@ -53,6 +57,12 @@ def run(args: list[str], timeout: int = 3600) -> subprocess.CompletedProcess:
     return subprocess.run(
         args, cwd=ROOT, capture_output=True, text=True, timeout=timeout
     )
+
+
+# 전남대 배포본의 서비스 버전. 코어 엔진 버전(rule-compass-core)과 **다른 계보**다
+# — 같은 번호를 쓰면 /health만 보고 어느 배포본인지 구별할 수 없다.
+# 코퍼스 갱신 배포마다 올린다. 주입 경로는 위 배포_명령의 --update-env-vars.
+SERVICE_VERSION = "1.9.8"
 
 
 def corpus_summary() -> dict:
@@ -79,7 +89,7 @@ def build_current_map(path, raw: list[dict]) -> dict:
     깨져도 테스트가 통과했다(4회차 교차검증: 반환을 적재분으로 되돌려도
     배선 테스트 3건이 전부 통과).
     """
-    from src.search import RuleSearchIndex
+    from core.search import RuleSearchIndex
 
     idx = RuleSearchIndex(path)
     rows = idx.articles
@@ -98,7 +108,7 @@ def reconcile_names() -> dict:
     """
     sys.path.insert(0, str(ROOT))
     from collect_rules import LIST_URL, http_get, parse_rule_list  # noqa: E402
-    from src.search import regulation_tier  # noqa: E402
+    from core.search import regulation_tier  # noqa: E402
 
     payload, _ = http_get(LIST_URL, timeout=60.0)
     rules = parse_rule_list(payload.decode("utf-8", errors="replace"))
@@ -323,7 +333,14 @@ def _finish(report: dict, before: dict, changed: bool | None = None) -> int:
         report["배포_명령"] = (
             f"gcloud builds submit --tag {image} --region=asia-northeast3 . && "
             f"gcloud run deploy cnu-rule-compass --region=asia-northeast3 --image={image} "
-            "--min-instances=1 --quiet"
+            "--min-instances=1 "
+            # ★ 이 레포는 2026-09-07(P04)부터 adapter다. 엔진이 wheel로 빠지면서
+            # SERVER_VERSION 하드코딩이 사라졌다 — 이 변수를 빠뜨리면 /health가
+            # 코어 엔진 버전(0.6.x)을 말한다. 빌드도 기동도 정상이라 배포 로그로는
+            # 안 보인다(검증 배포에서 실제로 놓쳤다). set-이 아니라 update-를 쓴다:
+            # set-은 ALLOWED_HOSTS(DNS rebinding 보호)를 지워 버린다.
+            f"--update-env-vars RULE_COMPASS_SERVER_VERSION={SERVICE_VERSION} "
+            "--quiet"
         )
         # min-instances는 상시 가동 정책(2026-08-19 확정)이다. 배포 시 명시하지 않으면
         # 기존 설정이 유지되지만, 명령만 보고 따라 하는 사람이 빠뜨리지 않게 박아 둔다.

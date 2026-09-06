@@ -15,7 +15,6 @@
   "project": "academyinfo-mcp-2026",
   "region": "asia-northeast3",
   "baseline_captured": "2026-09-02",
-
   "services": {
     "cnu-rule-compass": {
       "tier": "production",
@@ -24,9 +23,14 @@
         "min_instances": "1",
         "cpu": "2",
         "memory": "2Gi",
-        "tags_allowed": false
+        "tags_allowed": false,
+        "env_required": [
+          "RULE_COMPASS_SERVER_VERSION",
+          "ALLOWED_HOSTS"
+        ]
       },
-      "why_min_instances": "콜드스타트 p50 61.4초 실측(2026-09-02). 대면 서비스라 허용 불가."
+      "why_min_instances": "콜드스타트 p50 61.4초 실측(2026-09-02). 대면 서비스라 허용 불가.",
+      "why_env_required": "2026-09-07 코어 전환 P04부터 이 레포는 adapter다 — 엔진이 wheel로 빠지면서 SERVER_VERSION 하드코딩이 사라졌다. RULE_COMPASS_SERVER_VERSION을 주입하지 않으면 /health가 코어 엔진 버전(0.6.x)을 말한다. 빌드도 기동도 정상이라 검증 배포에서 실제로 놓쳤다. ALLOWED_HOSTS는 DNS rebinding 보호 스위치다."
     },
     "academyinfo-mcp": {
       "tier": "public",
@@ -40,7 +44,6 @@
       "why_min_instances": "콜드스타트 p50 1.1초 실측(2026-09-02). 상시 가동 근거 없음."
     }
   },
-
   "default_tier": "experimental",
   "experimental_expect": {
     "min_instances": "0",

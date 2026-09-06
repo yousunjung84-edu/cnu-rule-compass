@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import re
 
-from src.answer import answer
-from src.integrity import IntegrityChecker
-from src.lineage import get_default_lineage
-from src.search import RuleSearchIndex
+from core.answer import answer
+from core.integrity import IntegrityChecker
+from core.lineage import get_default_lineage
+from core.search import RuleSearchIndex
 
 
 EXIT_COMMANDS = {"종료", "끝", "exit", "quit", "q"}

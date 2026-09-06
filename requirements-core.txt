@@ -1,0 +1,20 @@
+# 비공개 코어의 **버전과 해시를 동시에** 고정한다 (2026-09-07, 코어 전환 P03).
+#
+# 왜 해시까지: 버전만 pin하면 같은 버전 번호로 다른 파일이 올라와도 빌드가
+# 통과한다. 그러면 E4에서 mcp==1.28.1을 정확히 pin한 의미가 반쪽이 된다 —
+# 「무엇이 깨졌는지 갈라낼 수 없다」는 그 문제가 코어 쪽으로 옮겨 갈 뿐이다.
+#
+# 값의 출처: 로컬 빌드 산출물의 shasum과 Artifact Registry가 보고한 SHA256이
+# 일치함을 확인했다(2026-09-07 게시 직후 실측).
+#
+# 갱신 절차: 코어에서 wheel을 빌드·게시한 뒤
+#   gcloud artifacts files list --repository=rule-compass-python \
+#     --location=asia-northeast3 --format="table(name.basename(),hashes.list())"
+# 가 보고하는 값을 여기 옮긴다. 손으로 적지 말고 붙여넣는다.
+#
+# ⚠️ pip --require-hashes는 **전부 아니면 전무**다. 여기 항목을 늘리면 그것도
+# 해시를 달아야 하고, 그 의존의 의존까지 전부 달아야 한다. 코어가
+# dependencies=[] 라서 지금은 한 줄로 끝난다 — 그 조건이 깨지면 이 파일이
+# 아니라 설치 방식을 다시 정해야 한다.
+rule-compass-core==0.6.1 \
+    --hash=sha256:2e3de32617c81d389a5d0d95580d7727f38cf4bc1469d3d7ba461a27ca2b8a66

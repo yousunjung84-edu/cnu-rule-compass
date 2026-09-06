@@ -12,12 +12,16 @@ from __future__ import annotations
 
 import json
 import re
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.references import ReferenceIndex  # noqa: E402
-from src.search import get_default_index  # noqa: E402
+# ★ 코어(wheel 설치본)는 코퍼스를 RULE_COMPASS_DATA_DIR 에서 찾는다 — 없으면
+# site-packages 옆을 보고 못 찾는다(2026-09-07 P04). 명시 지정이 있으면 존중한다.
+os.environ.setdefault("RULE_COMPASS_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))
+from core.references import ReferenceIndex  # noqa: E402
+from core.search import get_default_index  # noqa: E402
 
 # 본문에 이 패턴이 있으면 참조 목록에 흔적이 남아야 한다.
 NAME_PATTERN = re.compile(
