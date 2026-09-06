@@ -140,6 +140,29 @@ class GetArticleFieldsTest(unittest.TestCase):
              "article_no": None, "is_current": None, "by_record_id": False},
             lines[0])
 
+    def test_record_id를_키워드로_줘도_by_record_id가_참이다(self) -> None:
+        """리뷰가 주입한 드리프트 — 키워드 record_id를 바인딩에서 버리면 19/19 통과했다."""
+        fake_get_article.response = {"article": {"is_current": True}, "status": "ok"}
+        lines, _ = _capture(usage.wrap("get_article", fake_get_article),
+                            "학칙", "제1조", record_id="rec-1")
+        self.assertTrue(lines[0]["by_record_id"])
+
+    def test_규정명_앞뒤_공백은_원본처럼_strip된다(self) -> None:
+        """리뷰가 주입한 드리프트 — .strip() 제거도 19/19 통과했다."""
+        fake_get_article.response = {"article": {"is_current": True}, "status": "ok"}
+        lines, _ = _capture(usage.wrap("get_article", fake_get_article),
+                            "  전남대학교 학칙  ", "제1조")
+        self.assertEqual("전남대학교 학칙", lines[0]["rule"])
+
+    def test_바인딩이_안_되면_빈_식별자를_적지_않는다(self) -> None:
+        def odd(rule_name: str, article_no: str, record_id: str | None = None):
+            return {"article": {"is_current": True}, "status": "ok"}
+        wrapped = usage.wrap("get_article", odd)
+        # 원본 시그니처에 없는 인자 → _bind가 TypeError → {}
+        lines, _ = _capture(lambda: wrapped.__wrapped__("학칙", "제1조") and
+                            usage._bind(odd, ("학칙",), {"없는인자": 1}))
+        self.assertEqual({}, usage._bind(odd, ("학칙",), {"없는인자": 1}))
+
     def test_record_id_지정_여부가_실린다(self) -> None:
         fake_get_article.response = {
             "article": {"is_current": False}, "status": "ok"}

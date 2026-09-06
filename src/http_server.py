@@ -22,6 +22,10 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
+
+# 설치본 코어는 코퍼스를 RULE_COMPASS_DATA_DIR 에서 찾는다 — core import 전에 둔다(P04).
+os.environ.setdefault("RULE_COMPASS_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))
 
 from core.mcp_server import SERVER_VERSION, create_server
 from core.profile import active_profile

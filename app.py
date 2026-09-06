@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import re
+from pathlib import Path
+
+# 설치본 코어는 코퍼스를 RULE_COMPASS_DATA_DIR 에서 찾는다 — core import 전에 둔다(P04).
+os.environ.setdefault("RULE_COMPASS_DATA_DIR", str(Path(__file__).resolve().parent / "data"))
 
 from core.answer import answer
 from core.integrity import IntegrityChecker

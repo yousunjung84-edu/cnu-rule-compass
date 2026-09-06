@@ -32,8 +32,16 @@ def actual_config(project, region, svc):
     ann = tpl["metadata"].get("annotations", {})
     lim = tpl["spec"]["containers"][0].get("resources", {}).get("limits", {})
     tags = [t["tag"] for t in d.get("status", {}).get("traffic", []) if t.get("tag")]
-    env = {e["name"]: e.get("value", "")
-           for e in tpl["spec"]["containers"][0].get("env", [])}
+    # 값이 아니라 **소비 코드가 보는 존재**를 따진다(2026-09-07 두 리뷰 반영):
+    # - 공백뿐인 값은 없는 것이다. 코어는 .strip() 뒤 폴백하고 ALLOWED_HOSTS는
+    #   콤마 분리 뒤 빈 배열이 된다 — "   " 가 통과하면 검사가 거짓 안심을 준다.
+    # - valueFrom(Secret Manager·ConfigMap 참조)은 값을 여기서 못 보지만 존재한다.
+    env = {}
+    for e in tpl["spec"]["containers"][0].get("env", []):
+        if "valueFrom" in e:
+            env[e["name"]] = "<valueFrom>"
+        else:
+            env[e["name"]] = str(e.get("value", "")).strip()
     return {
         "min_instances": ann.get("autoscaling.knative.dev/minScale", "0"),
         "cpu": lim.get("cpu", ""),

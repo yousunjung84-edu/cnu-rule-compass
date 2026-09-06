@@ -158,7 +158,11 @@ def wrap(name: str, fn):
                 if name == "search_rule":
                     log_usage(name, **_search_fields(response))
                 else:
-                    log_usage(name, **_get_article_fields(response, _bind(fn, args, kwargs)))
+                    bound = _bind(fn, args, kwargs)
+                    # 바인딩이 안 되면 호출 인자를 모르는 것이다 — rule=""로 적느니
+                    # 안 적는다(리뷰 지적: 성공 응답에 빈 식별자가 남던 경로).
+                    if bound:
+                        log_usage(name, **_get_article_fields(response, bound))
         except Exception:
             # 집계 실패가 도구 응답을 막지 않는다 — log_usage와 같은 계약이다.
             pass
