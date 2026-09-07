@@ -35,39 +35,16 @@ sys.path.insert(0, str(ROOT))
 # ★ 코어(wheel 설치본)는 코퍼스를 RULE_COMPASS_DATA_DIR 에서 찾는다 — 없으면
 # site-packages 옆을 보고 못 찾는다(2026-09-07 P04). 명시 지정이 있으면 존중한다.
 os.environ.setdefault("RULE_COMPASS_DATA_DIR", str(ROOT / "data"))
+from core.item_style import PAST_VERSION_RE, extract  # noqa: E402  # 진본 (P07 가′)
 from core.search import prepare_article  # noqa: E402
-from collect_rules import _UNDERLINE_TAG  # noqa: E402  # 조문 경로와 같은 밑줄 제거 규칙
 
 CORPUS = ROOT / "data" / "rules_corpus.json"
 MARKDOWN = ROOT / "data" / "markdown"
 FAILURES = ROOT / "data" / "failures_full.jsonl"
-# '1. 목 적', '3. 재입학 대상 및 제외대상' — 줄머리 번호 + 마침표 + 한 줄 제목
-HEADER_RE = re.compile(r"(?m)^\s*(?P<no>\d{1,2})\s*\.\s*(?P<title>[^\n]{1,40})$")
-# 규정명이 스스로 구판본이라 말하는 표기
-PAST_VERSION_RE = re.compile(r"개정\s*전|이전|폐지|\(\s*\d{4}")
-MIN_ITEMS = 3
-
-
-def extract(text: str) -> list[tuple[str, str, str]]:
-    """(항목번호, 제목, 본문). 번호가 1부터 순증하는 헤더만 인정한다."""
-    sequence = []
-    expected = 1
-    for match in HEADER_RE.finditer(text):
-        if int(match.group("no")) == expected:
-            sequence.append(match)
-            expected += 1
-    if len(sequence) < MIN_ITEMS:
-        return []
-    items: list[tuple[str, str, str]] = []
-    for index, match in enumerate(sequence):
-        end = sequence[index + 1].start() if index + 1 < len(sequence) else len(text)
-        body = text[match.end():end].strip()
-        body = _UNDERLINE_TAG.sub("", body)   # kordoc 4.12.0 밑줄 태그 — 조문 경로와 같은 세대로(code-review #7)
-        if not body:
-            continue
-        title = " ".join(match.group("title").split())
-        items.append((f"{int(match.group('no'))}.", title, body))
-    return items
+# ★ 항목 추출 로직은 core/item_style.py가 진본이다 (2026-09-07, P07 가′).
+# 대학 무관 순수 함수인데 운영본에만 있었다. 이식 후 전남대 마크다운 477파일
+# 1,641항목에서 산출이 글자 단위로 같은 것을 확인했다(불일치 0).
+# 여기 남는 것은 이 레포의 몫뿐이다 — 경로, 실패목록 읽기, 코퍼스 병합, 멱등성.
 
 
 def main() -> int:

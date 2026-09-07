@@ -27,73 +27,18 @@ sys.path.insert(0, str(ROOT))
 # ★ 코어(wheel 설치본)는 코퍼스를 RULE_COMPASS_DATA_DIR 에서 찾는다 — 없으면
 # site-packages 옆을 보고 못 찾는다(2026-09-07 P04). 명시 지정이 있으면 존중한다.
 os.environ.setdefault("RULE_COMPASS_DATA_DIR", str(ROOT / "data"))
+from core.attachments import extract  # noqa: E402  # 추출 로직 진본 (P07 가′)
 from core.search import prepare_article  # noqa: E402
-from collect_rules import _UNDERLINE_TAG  # noqa: E402  # 조문 경로와 같은 밑줄 제거 규칙
 
 CORPUS = ROOT / "data" / "rules_corpus.json"
 MARKDOWN = ROOT / "data" / "markdown"
-# '[별표]', '【별표 1】', '## [별표1] 주차요금표', '<별표 1 > <개정 …>' 등 세 가지 괄호 계열.
-# v1.5의 엄격 패턴은 '괄호만 있는 줄'만 인정해 **제목이 같은 줄에 붙은 52건을 통째로
-# 놓쳤다**(이해충돌지침 징계양정기준·주차요금표 등 판단 기준이 별표에만 있는 것들).
-# 원문은 여는·닫는 괄호가 어긋나기도 한다 — '## [별표 1〕'(ASCII 여는 + U+3015 닫는).
-# 닫는 괄호 후보를 넓히고 라벨 길이를 20자로 제한한다. 제한이 없으면 라벨이
-# 다음 '>'까지 폭주해 '별표 2〕 ### … <table' 같은 인용 불가 조문번호가 생긴다.
-HEADER_RE = re.compile(
-    r"^#{0,4}\s*[\[【<〔]\s*(?P<label>별표[^\]】>〕』]{0,20}?)\s*[\]】>〕』]\s*"
-    r"(?P<inline>[^\n]*)$",
-    re.M,
-)
-TITLE_RE = re.compile(r"^#+\s*(.+)$", re.M)
-# 목차 줄: 제목 뒤에 점선·쪽수가 붙는다. 본문 헤더가 아니므로 블록으로 잡으면 안 된다.
-TOC_TAIL_RE = re.compile(r"(?:[-.]{3,}\s*\d+|\s\d+)\s*$")
-# '[별표 1]과 같다' 같은 문장 안 인용 — 헤더가 아니다.
-SENTENCE_TAIL_RE = re.compile(r"(?:같다|따른다|의하다|참조)[.。]?\s*$")
-
-
-def _normalize_label(label: str) -> str:
-    """'별표1', '별표 1.' → '별표 1' (표기 흔들림을 조문번호에서 흡수한다)."""
-    text = " ".join(str(label).split()).strip("[]【】〔〕『』<>").rstrip(".")
-    match = re.fullmatch(r"별표\s*(.*)", text)
-    if not match:
-        return text
-    rest = match.group(1).strip()
-    return f"별표 {rest}" if rest else "별표"
-
-
-def extract(text: str) -> list[tuple[str, str, str]]:
-    """(별표 라벨, 제목, 본문) 목록. 다음 별표 헤더 전까지를 한 덩이로 본다."""
-    headers = [
-        match
-        for match in HEADER_RE.finditer(text)
-        if not TOC_TAIL_RE.search(match.group("inline").strip())
-        and not SENTENCE_TAIL_RE.search(match.group("inline").strip())
-    ]
-    blocks: list[tuple[str, str, str]] = []
-    for index, header in enumerate(headers):
-        start = header.end()
-        end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
-        body = text[start:end].strip()
-        body = _UNDERLINE_TAG.sub("", body)   # kordoc 4.12.0 밑줄 태그 — 조문 경로와 같은 세대로(code-review #7)
-        inline = header.group("inline").strip().lstrip("#").strip()
-        # 제목 뒤 개정 표기 '<개정 2025. 2. 17.>'는 마크업이므로 제목에서 뺀다
-        # (본문은 건드리지 않는다 — 표시용 제목만 다듬는다).
-        inline = re.sub(r"\s*<[^>]*>\s*$", "", inline).strip()
-        title = inline if inline and not inline.startswith("<") else ""
-        if not title:
-            title_match = TITLE_RE.search(body)
-            if title_match and title_match.start() < 80:
-                title = title_match.group(1).strip()
-                body = (body[: title_match.start()] + body[title_match.end():]).strip()
-        if not body:
-            continue
-        blocks.append((_normalize_label(header.group("label")), title, body))
-    # 같은 라벨이 두 번 잡히면(목차 잔재 등) 본문이 긴 쪽을 정본으로 본다.
-    best: dict[str, tuple[str, str, str]] = {}
-    for label, title, body in blocks:
-        if label not in best or len(body) > len(best[label][2]):
-            best[label] = (label, title, body)
-    order = list(dict.fromkeys(label for label, _, _ in blocks))
-    return [best[label] for label in order]
+# ★ 별표 추출 로직은 core/attachments.py가 진본이다 (2026-09-07, P07 가′).
+# 예전에는 정규식 4개와 extract()가 여기 있었다 — 대학 무관 순수 함수인데
+# 운영본에만 있어 확산 대학이 쓸 수 없었다. 이식 후 전남대 마크다운 258파일
+# 1,343블록에서 산출이 글자 단위로 같은 것을 확인했다(불일치 0).
+#
+# 여기 남는 것은 **이 레포의 몫**뿐이다 — 마크다운 경로, 코퍼스 병합, 멱등성,
+# 백업. 코퍼스가 list 형식인 것도 전남대 고유라 코어로 올리지 않았다.
 
 
 def main() -> int:
