@@ -48,3 +48,8 @@ data/corpus_refresh_report.json
 data/corpus_refresh.out
 data/corpus_refresh.err
 data/rules_corpus.json.*
+
+# 소급 재파싱 증거·백업 — 코퍼스 조각(본문)을 담는다. 공개 레포에 올리지 않는다.
+data/reparse_evidence_*.json
+data/reparse_removed.json
+data/rules_corpus.json.pre_*
