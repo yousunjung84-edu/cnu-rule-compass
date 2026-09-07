@@ -66,9 +66,18 @@ def _service_version() -> str:
     """pyproject.toml [project].version 을 그대로 쓴다 — 리뷰(9/7)가 진본이 셋
     (여기 상수·pyproject·Cloud Run env)이라 짚었다. 여기서 읽으면 둘로 준다.
     env는 배포 명령이 이 값으로 채우므로 결국 하나다."""
-    import tomllib
-    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    return str(data["project"]["version"])
+    # tomllib은 3.11+다. pyproject가 >=3.10을 허용하므로 정규식 폴백을 둔다
+    # (2026-09-07 Codex #10) — 값이 한 줄이라 파서가 없어도 정확히 읽힌다.
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    try:
+        import tomllib
+        return str(tomllib.loads(text)["project"]["version"])
+    except ModuleNotFoundError:
+        import re
+        m = re.search(r'^version = "([^"]+)"', text, re.M)
+        if not m:
+            raise RuntimeError("pyproject.toml에서 [project].version을 찾지 못했다")
+        return m.group(1)
 
 
 SERVICE_VERSION = _service_version()
