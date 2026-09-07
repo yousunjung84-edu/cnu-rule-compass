@@ -16,5 +16,5 @@
 # 해시를 달아야 하고, 그 의존의 의존까지 전부 달아야 한다. 코어가
 # dependencies=[] 라서 지금은 한 줄로 끝난다 — 그 조건이 깨지면 이 파일이
 # 아니라 설치 방식을 다시 정해야 한다.
-rule-compass-core==0.6.3 \
-    --hash=sha256:c0aeb2accb93319a54e9cde49da1e06d89650f988d1e583b7f432605b79dcd83
+rule-compass-core==0.6.4 \
+    --hash=sha256:c616e49921a0f8e79ad69e81a17e6870bf5201d0483b30a3fd5761e41f00a8e4
