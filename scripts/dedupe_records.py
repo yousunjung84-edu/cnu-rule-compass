@@ -30,9 +30,15 @@
 
 실행 뒤 change_gate 승인이 남는다 — 이 도구는 게이트를 대신하지 않는다.
 
+3) `--ids` 로 **명시 지정한 record_id**만 제거 — 자동 판정이 넘칠 때 쓴다.
+   별표 구간 offset으로 판정하면 374건이 걸린다(2026-09-07 실측). 그 규모는
+   사람이 보고 정할 일이라, 확정한 것만 id로 넘겨 지운다. 지정한 id가 코퍼스에
+   없으면 **오류로 멈춘다** — 조용히 0건 처리하지 않는다.
+
 사용:
     python3 scripts/dedupe_records.py --dry-run
     python3 scripts/dedupe_records.py
+    python3 scripts/dedupe_records.py --ids rule-4213-... ,rule-3260-... --dry-run
 """
 from __future__ import annotations
 
@@ -51,11 +57,58 @@ STAMP = datetime.datetime.now().strftime("%y%m%d_%H%M%S")
 DRY = "--dry-run" in sys.argv
 
 
+def _explicit_ids() -> set[str] | None:
+    for i, a in enumerate(sys.argv):
+        if a.startswith("--ids="):
+            raw = a.split("=", 1)[1]
+        elif a == "--ids":
+            if i + 1 >= len(sys.argv) or sys.argv[i + 1].startswith("-"):
+                print("[오류] --ids 뒤에 쉼표로 구분한 record_id가 필요하다", file=sys.stderr)
+                raise SystemExit(2)
+            raw = sys.argv[i + 1]
+        else:
+            continue
+        ids = {x.strip() for x in raw.split(",") if x.strip()}
+        if not ids:
+            print("[오류] --ids 가 비어 있다", file=sys.stderr)
+            raise SystemExit(2)
+        return ids
+    return None
+
+
 def main() -> int:
     rows = json.loads(CORPUS.read_text(encoding="utf-8"))
     if not isinstance(rows, list):
         print("[중단] 코퍼스가 list가 아니다", file=sys.stderr)
         return 2
+
+    explicit = _explicit_ids()
+    if explicit is not None:
+        present = {r.get("record_id") for r in rows}
+        missing = explicit - present
+        if missing:
+            print(f"[오류] 코퍼스에 없는 record_id {len(missing)}건: "
+                  f"{sorted(missing)[:3]}", file=sys.stderr)
+            return 2
+        out = [r for r in rows if r.get("record_id") not in explicit]
+        dropped = [{"record_id": r.get("record_id"), "source_key": r.get("source_key"),
+                    "조문번호": r.get("조문번호"), "조문제목": r.get("조문제목"),
+                    "본문_앞": str(r.get("본문", ""))[:70]}
+                   for r in rows if r.get("record_id") in explicit]
+        print(json.dumps({"이전": len(rows), "이후": len(out),
+                          "명시_제거": len(dropped)}, ensure_ascii=False))
+        ev = ROOT / "data" / f"dedupe_evidence_{STAMP}_{'dryrun' if DRY else 'applied'}.json"
+        ev.write_text(json.dumps({"명시_제거": dropped}, ensure_ascii=False, indent=1),
+                      encoding="utf-8")
+        print(f"증거: {ev.name}")
+        if DRY:
+            return 0
+        backup = CORPUS.with_suffix(f".json.pre_dedupe_{STAMP}")
+        shutil.copy2(CORPUS, backup)
+        CORPUS.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"적용 완료 · 백업 {backup.name}")
+        print("⚠️ change_gate 승인이 남았다 — 이 도구는 게이트를 대신하지 않는다.")
+        return 0
 
     # ── 규정별 별표 본문 (판정 ②의 근거) ────────────────────────────
     byul = collections.defaultdict(str)
