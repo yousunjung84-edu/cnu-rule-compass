@@ -354,6 +354,10 @@ def _finish(report: dict, before: dict, changed: bool | None = None) -> int:
             f"gcloud builds submit --tag {image} --region=asia-northeast3 . && "
             f"gcloud run deploy cnu-rule-compass --region=asia-northeast3 --image={image} "
             "--min-instances=1 "
+            # 동시성 상한도 박는다(2026-09-25). 512Mi 는 동시성 40에서 잰 메모리가
+            # 근거다 — ops/protected_services.json why_resources. 생략하면 기존 값이
+            # 유지되지만, 명령만 보고 새 서비스를 만드는 사람은 기본값 80을 받는다.
+            "--concurrency=40 "
             # ★ 이 레포는 2026-09-07(P04)부터 adapter다. 엔진이 wheel로 빠지면서
             # SERVER_VERSION 하드코딩이 사라졌다 — 이 변수를 빠뜨리면 /health가
             # 코어 엔진 버전(0.6.x)을 말한다. 빌드도 기동도 정상이라 배포 로그로는

@@ -46,6 +46,10 @@ def actual_config(project, region, svc):
         "min_instances": ann.get("autoscaling.knative.dev/minScale", "0"),
         "cpu": lim.get("cpu", ""),
         "memory": lim.get("memory", ""),
+        # containerConcurrency 가 없으면 Cloud Run 기본값 80이다 (2026-09-25 Codex
+        # 리뷰 반영). 512Mi 의 근거가 동시성 40 상한에서 잰 메모리라, 상한이 바뀌면
+        # 그 근거가 무너지는데 cpu·memory 만 보는 검사는 이를 못 잡았다.
+        "concurrency": str(tpl["spec"].get("containerConcurrency", 80)),
         "tags": tags,
         "env": env,
     }
@@ -72,7 +76,7 @@ def main():
         expect = spec["expect"] if spec else decl["experimental_expect"]
         act = actual_config(project, region, svc)
 
-        for key in ("min_instances", "cpu", "memory"):
+        for key in ("min_instances", "cpu", "memory", "concurrency"):
             want = expect.get(key)
             if want is None:
                 continue  # 실험 등급은 cpu/memory 미고정
