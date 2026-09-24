@@ -6,6 +6,8 @@
 #
 # 값의 출처: 로컬 빌드 산출물의 shasum과 Artifact Registry가 보고한 SHA256이
 # 일치함을 확인했다(2026-09-07 게시 직후 실측).
+# 0.7.0(2026-09-24): 재현 빌드(SOURCE_DATE_EPOCH) 로컬 == 레지스트리 표기 ==
+# 레지스트리에서 받은 사본. 게시 전에 이 바이트로 임시 서비스 검증을 마쳤다.
 #
 # 갱신 절차: 코어에서 wheel을 빌드·게시한 뒤
 #   gcloud artifacts files list --repository=rule-compass-python \
@@ -16,5 +18,5 @@
 # 해시를 달아야 하고, 그 의존의 의존까지 전부 달아야 한다. 코어가
 # dependencies=[] 라서 지금은 한 줄로 끝난다 — 그 조건이 깨지면 이 파일이
 # 아니라 설치 방식을 다시 정해야 한다.
-rule-compass-core==0.6.4 \
-    --hash=sha256:c616e49921a0f8e79ad69e81a17e6870bf5201d0483b30a3fd5761e41f00a8e4
+rule-compass-core==0.7.0 \
+    --hash=sha256:a4e5a0cded32260398b9abfaa08ccc2e462a0775628ca553343a91c13b8f9af7
