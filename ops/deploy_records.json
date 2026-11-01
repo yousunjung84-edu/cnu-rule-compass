@@ -1,0 +1,27 @@
+{
+  "_about": "운영 배포 기록. 코퍼스·계보는 공개 저장소에 싣지 않으므로(.gitignore) 빌드 입력은 SHA256으로 남긴다. 배포마다 항목을 추가한다.",
+  "records": [
+    {
+      "date": "2026-11-02",
+      "service_version": "1.10.0",
+      "revision": "cnu-rule-compass-00034-cwd",
+      "image": "cnu-rule-compass:v1.10.0-rc1",
+      "digest": "sha256:18b0481e10229703b477e16e54ba945f7140113fd74607568ac6affa271476f4",
+      "corpus": "2026-09 운영판(808규정, /health articles 16908) — 9/24 빌드 당시 입력 해시 미기록(index corpus_sha256 접두 68c8b6253eb8ba86)",
+      "verified_by": "검증본 00039-gen(min0·태그 v1100): 실질의 10/10 운영과 동일, 40동시 2분 4964건 오류0, 메모리 평균 ~48%",
+      "rollback": "cnu-rule-compass-00032-fjg (1.9.11, 2vCPU·2Gi)"
+    },
+    {
+      "date": "2026-11-02",
+      "service_version": "1.10.1",
+      "change": "2026-10-01 월간 갱신 코퍼스(+6규정·원본 +161행, 게이트 OK·change-gate 위험 0·개명 5) 반영",
+      "inputs_sha256": {
+        "data/rules_corpus.json": "c90eb1039bdde11350c5bd07a05973a88febb4ff4b7f2b3b3897055ec7043c79",
+        "data/lineage_corpus.json": "5c8034051143806a400a728b94cdc3d7df75450ed23b8dd92a5832f67827baa2",
+        "data/integrity_selfcheck_samples.json": "88eb2155b4da7fff6ed071260549be25e4a3b050fa6888056775299d34a70766",
+        "data/coverage_report.json": "bacdc13cd0d75311a08bcb1c154715bca0003d78dc5ef137d2da6f7928a4915d"
+      },
+      "note": "베이스 이미지 python:3.12-slim·keyrings 패키지는 digest/버전 미고정 — 같은 커밋 재빌드가 같은 이미지라는 보장은 없다. 검증·운영은 같은 digest를 쓴다."
+    }
+  ]
+}
