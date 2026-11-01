@@ -21,7 +21,19 @@
         "data/integrity_selfcheck_samples.json": "88eb2155b4da7fff6ed071260549be25e4a3b050fa6888056775299d34a70766",
         "data/coverage_report.json": "bacdc13cd0d75311a08bcb1c154715bca0003d78dc5ef137d2da6f7928a4915d"
       },
-      "note": "베이스 이미지 python:3.12-slim·keyrings 패키지는 digest/버전 미고정 — 같은 커밋 재빌드가 같은 이미지라는 보장은 없다. 검증·운영은 같은 digest를 쓴다."
+      "note": "베이스 이미지 python:3.12-slim·keyrings 패키지는 digest/버전 미고정 — 같은 커밋 재빌드가 같은 이미지라는 보장은 없다. 검증·운영은 같은 digest를 쓴다.",
+      "revision": "cnu-rule-compass-00036-hl7",
+      "image": "cnu-rule-compass:v1.10.1",
+      "digest": "sha256:12137642563f3ecbbff7ffd1eb90d7585e06c8fdb26e8871f3f24a410f042880",
+      "build_id": "22f94a69-b0a5-46e8-9104-c66beefda10a",
+      "health": "1.10.1 · articles 17069 · rules 814",
+      "verified_by": "검증본 00043-mas(min0·태그 v1101): 신규 6판(모두 '개정전' 옛판) 검색 6/6, 기존 12질의 같은 조문(BM25 점수만 변동), 40동시 3분 6980건 오류0 p99 1.36s, 메모리 평균 ~51%",
+      "cold_start_s": [
+        2.39,
+        2.42,
+        2.25
+      ],
+      "rollback": "cnu-rule-compass-00034-cwd (1.10.0)"
     }
   ]
 }
