@@ -52,6 +52,24 @@
    "build_id": "57e4176a-4cbd-4acf-9f91-32898217e661",
    "health": "1.10.2 · articles 17100 · rules 817",
    "verified_by": "트래픽 고정 상태로 무트래픽 배포 → update-traffic 100%. 교무과 URL 실질의: 학사경고 1위 학칙 제37조 · 강의료지급/만족도 조사 지침 현행본(개정전 혼입 0) · get_corpus_stats 817/17100/최신수집 2026-11-02T10:01:49 · 구 호스트 421 · drift 0 · 리비전 min 미설정(0)·1vCPU·512Mi·conc 40·ALLOWED_HOSTS 보존"
+  },
+  {
+   "date": "2026-11-02",
+   "service_version": "1.10.3",
+   "change": "11/2 20:09 재갱신분(+2규정·+26조문: 5105 「학생 중도탈락 예방을 위한 관리 지침」·5106 같은 지침 2026.7.23 개정전, 게이트 OK·change-gate 위험 0). 신규 2판은 kordoc 4.24.38 변환(기존 레코드는 동결·불변)",
+   "inputs_sha256": {
+    "data/rules_corpus.json": "230fbfaac6057efa1c8afe63a35807ac949f92b75193d51372aee566e5ccf776",
+    "data/lineage_corpus.json": "5c8034051143806a400a728b94cdc3d7df75450ed23b8dd92a5832f67827baa2",
+    "data/integrity_selfcheck_samples.json": "88eb2155b4da7fff6ed071260549be25e4a3b050fa6888056775299d34a70766",
+    "data/coverage_report.json": "2401a2df37634da6051537b8de398337c0bcdabb91b59e2f86a9500279b08506"
+   },
+   "rollback": "cnu-rule-compass-00038-j7l (1.10.2, min0)",
+   "revision": "cnu-rule-compass-00039-vlq",
+   "image": "cnu-rule-compass:v1.10.3",
+   "digest": "sha256:73619b61a48001c90c5781cb3d57183a677e201bdf1b6b33d1ffecd25958dda3",
+   "build_id": "e11aa3e6-eab2-4012-adef-36e273b12808",
+   "health": "1.10.3 · articles 17126 · rules 819",
+   "verified_by": "digest 지정 무트래픽 배포 → 리비전 설정 확인(min 미설정=0·1vCPU·512Mi·conc 40·ALLOWED_HOSTS·VERSION 1.10.3) → update-traffic 100%. get_corpus_stats 819/17126 · search_rule 「중도탈락 예방 학생맞춤통합지원위원회」 상위 3 = 신규 지침 현행본(개정전 판 아님) · 「학사경고」 상위 학부재입학 세부지침·학칙 제54조·교학규정 제52조 · drift 0 · refresh_status_check 이상 0. 한계: 1.10.2 와 같은 질의 전후 대조는 하지 않았다(태그 금지로 옛 리비전 직접 호출 불가)"
   }
  ]
 }
