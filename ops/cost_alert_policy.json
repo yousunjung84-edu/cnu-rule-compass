@@ -1,0 +1,28 @@
+{
+ "_note": "Cloud Monitoring 경보 정책 사본(사람용 기록). 진본은 GCP — 고칠 때는 GCP 와 이 파일을 함께 고친다. 2026-11-02 기준선을 min=1 시절 '유휴 인스턴스 합 > 2'에서 '과금 인스턴스 시간 합 > 0.5'로 바꿈(근거는 documentation).",
+ "policy": "projects/academyinfo-mcp-2026/alertPolicies/17411205232290069505",
+ "displayName": "Cloud Run 상시 과금 인스턴스 이상 (비용 누수 조기경보)",
+ "enabled": true,
+ "conditions": [
+  {
+   "displayName": "과금 인스턴스 시간 합 > 0.5 (30분 지속)",
+   "conditionThreshold": {
+    "filter": "resource.type=\"cloud_run_revision\" AND metric.type=\"run.googleapis.com/container/billable_instance_time\"",
+    "comparison": "COMPARISON_GT",
+    "thresholdValue": 0.5,
+    "duration": "1800s",
+    "trigger": {
+     "count": 1
+    },
+    "aggregations": [
+     {
+      "alignmentPeriod": "300s",
+      "perSeriesAligner": "ALIGN_RATE",
+      "crossSeriesReducer": "REDUCE_SUM"
+     }
+    ]
+   }
+  }
+ ],
+ "documentation": "프로젝트 전체 Cloud Run **과금 인스턴스 시간** 합이 30분 연속 0.5(인스턴스·초/초)를 넘었습니다.\n\n정상 기준선(2026-11-02 갱신): 모든 서비스 min-instances=0 · 요청 기반 과금이라 평상시 합은 거의 0(실측 0.005 안팎). 요청이 없는 동안에도 과금 시간이 쌓이면 min-instances 가 1 이상인 리비전이 살아 있다는 뜻입니다. min=1 리비전 1개 = 약 1.0.\n\n실측 근거(2026-11-02, 7일 지표): cnu min=1 시절 1.00 · 월간 대조표 실행(10개 서비스 동시 호출) 최대 0.31 · 평상시 0.005. 기준 0.5 는 둘 사이.\n이전 조건(유휴 인스턴스 합 > 2)은 min=1 시절 기준이라 폐기했습니다. 유휴 인스턴스는 요청 뒤 15분쯤 남아 있지만 요청 기반 과금에서는 돈이 들지 않아, 대조표 실행 때마다 오경보가 났습니다(2026-11-02 10:42, 값 5.8).\n\n대표 원인: 'gcloud run deploy --min-instances=1 --no-traffic --tag=...' 로 만든 검증용 리비전. 태그가 붙은 리비전은 트래픽 0%여도 min-instances가 유지돼 영구 과금됩니다(1개당 월 약 5만원). 또는 min-instances 를 0 으로 되돌리지 않은 운영 리비전.\n\n확인: gcloud run services describe <svc> --region asia-northeast3 --format='value(status.traffic)' · rulecompass-build/scripts/revision_tag_guard.sh audit\n조치: gcloud run services update-traffic <svc> --region asia-northeast3 --remove-tags <tag들> (운영 설정 변경은 ops/protected_services.json 먼저)\n\n근거: 2026-09-02 사고 — 태그 4개가 월 약 20만원을 태웠음."
+}
