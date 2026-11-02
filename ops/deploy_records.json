@@ -70,6 +70,24 @@
    "build_id": "e11aa3e6-eab2-4012-adef-36e273b12808",
    "health": "1.10.3 · articles 17126 · rules 819",
    "verified_by": "digest 지정 무트래픽 배포 → 리비전 설정 확인(min 미설정=0·1vCPU·512Mi·conc 40·ALLOWED_HOSTS·VERSION 1.10.3) → update-traffic 100%. get_corpus_stats 819/17126 · search_rule 「중도탈락 예방 학생맞춤통합지원위원회」 상위 3 = 신규 지침 현행본(개정전 판 아님) · 「학사경고」 상위 학부재입학 세부지침·학칙 제54조·교학규정 제52조 · drift 0 · refresh_status_check 이상 0. 한계: 1.10.2 와 같은 질의 전후 대조는 하지 않았다(태그 금지로 옛 리비전 직접 호출 불가)"
+  },
+  {
+   "date": "2026-11-02",
+   "service_version": "1.10.4",
+   "change": "본칙 194행(72규정)에 kordoc 4.12 가 빠뜨린 항 번호 328개만 삽입 — scripts/restore_paragraph_marks.py(기준 = kordoc 4.24.38 전량 재변환). 기존 글자 불변·record_id/revision 불변·행 수 불변(17347). 거부 11건(원천 <생략>·별지 꼬리·깨진 글자 U+F082)은 손대지 않음. change-gate 위험 0·차단 0",
+   "inputs_sha256": {
+    "data/rules_corpus.json": "64f7f78e8d4239b8871fe975043c2fe38d8f44b2d93df669b528b0078fe09db0",
+    "data/lineage_corpus.json": "5c8034051143806a400a728b94cdc3d7df75450ed23b8dd92a5832f67827baa2",
+    "data/integrity_selfcheck_samples.json": "88eb2155b4da7fff6ed071260549be25e4a3b050fa6888056775299d34a70766",
+    "data/coverage_report.json": "2401a2df37634da6051537b8de398337c0bcdabb91b59e2f86a9500279b08506"
+   },
+   "rollback": "cnu-rule-compass-00039-vlq (1.10.3, min0)",
+   "revision": "cnu-rule-compass-00040-rmh",
+   "image": "cnu-rule-compass:v1.10.4",
+   "digest": "sha256:00d5224b1c309b8fa1083b47a4173e9c2b72258fc7c914e9da5c24c00245afb0",
+   "build_id": "6d0006be-d647-4f62-b579-9532c396993b",
+   "health": "1.10.4 · articles 17126 · rules 819",
+   "verified_by": "digest 지정 무트래픽 배포 → 리비전 설정 확인(min 미설정=0·1vCPU·512Mi·conc 40·ALLOWED_HOSTS·VERSION 1.10.4) → update-traffic 100%. get_article 실조회 3건 복원 확인(공학교육인증 외부자문위원회 운영세칙 제1조 「제9조 ④항」·정보보안기본지침 제4조 「② 총장은」·수업관리 지침(2014.6.27 개정전) 제53조 「③ 특별강의는」) · get_corpus_stats 819/17126 · drift 0 · 갱신 상태 이상 0"
   }
  ]
 }
