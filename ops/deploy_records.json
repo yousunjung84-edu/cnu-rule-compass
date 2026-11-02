@@ -45,7 +45,13 @@
     "data/integrity_selfcheck_samples.json": "88eb2155b4da7fff6ed071260549be25e4a3b050fa6888056775299d34a70766",
     "data/coverage_report.json": "8de8dcf5459587b07abd400b7e9649d3cb3e2004517d9944840d0ce34b126e44"
    },
-   "rollback": "cnu-rule-compass-00037-v4x (1.10.1, min0)"
+   "rollback": "cnu-rule-compass-00037-v4x (1.10.1, min0)",
+   "revision": "cnu-rule-compass-00038-j7l",
+   "image": "cnu-rule-compass:v1.10.2",
+   "digest": "sha256:92a9ea6c1d4b6c73b260218e6028b74542a10d9e7467d2cf0aa2b5574e52f854",
+   "build_id": "57e4176a-4cbd-4acf-9f91-32898217e661",
+   "health": "1.10.2 · articles 17100 · rules 817",
+   "verified_by": "트래픽 고정 상태로 무트래픽 배포 → update-traffic 100%. 교무과 URL 실질의: 학사경고 1위 학칙 제37조 · 강의료지급/만족도 조사 지침 현행본(개정전 혼입 0) · get_corpus_stats 817/17100/최신수집 2026-11-02T10:01:49 · 구 호스트 421 · drift 0 · 리비전 min 미설정(0)·1vCPU·512Mi·conc 40·ALLOWED_HOSTS 보존"
   }
  ]
 }
