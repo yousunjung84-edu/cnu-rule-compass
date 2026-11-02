@@ -2,9 +2,9 @@
 # ⛔ 이 스크립트는 무력화돼 있다 — 어떤 인자로 실행해도 아무것도 바꾸지 않는다.
 #
 # ── 서비스별 min-instances 정책 (2026-09-02 박사 확정) ──────────────────────
-#   cnu-rule-compass : min-instances=1  (상시 가동 유지)
-#       AIONI(전남대 AI 플랫폼) 정식 커넥터. 콜드스타트 **p50 61.4초** 실측(30일).
-#       요청 간격 분석상 영업일당 7.6회 콜드스타트 조건 — 교무과 대면 서비스라 불가.
+#   cnu-rule-compass : min-instances=0  (2026-11-02 박사 결정, 9/2 min=1 을 대체)
+#       9/2 근거는 옛 엔진 콜드스타트 p50 61.4초. DB 모드(코어 0.7.0) 재실측은
+#       2.25~2.42초(3회) — 근거·재검토 트리거는 ops/protected_services.json.
 #
 #   academyinfo-mcp  : min-instances=0  (2026-09-02 변경, 이전 8/19 결정을 대체)
 #       콜드스타트 **p50 1.1초 / p99 3.5초** 실측 — 상시 가동이 필요 없다.
@@ -28,6 +28,6 @@
 # 검증용 리비전에 --min-instances=1 을 딸려 보내면 태그를 뗄 때까지 영구 과금된다.
 # 검증 배포는 scripts/revision_tag_guard.sh 를 쓸 것(min-instances=0 강제 + 누수 감사).
 echo "[중단] min-instances 일괄 변경은 폐지된 절차입니다."
-echo "       정책: cnu-rule-compass=1 / academyinfo-mcp=0 (2026-09-02 박사 확정)"
+echo "       정책: cnu-rule-compass=0 (2026-11-02) / academyinfo-mcp=0 (2026-09-02) 박사 확정"
 echo "       변경이 필요하면 스크립트 주석의 서비스별 명령을 박사 확인 후 직접 실행하십시오."
 exit 0
