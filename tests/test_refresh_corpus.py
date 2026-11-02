@@ -89,3 +89,21 @@ class AdoptCandidateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeclaredScalingTest(unittest.TestCase):
+    """배포 명령의 min-instances·동시성은 선언 파일을 따른다 (2026-11-02)."""
+
+    def test_matches_protected_services(self):
+        import json as _json
+        from pathlib import Path as _Path
+        sys.path.insert(0, str(_Path(__file__).resolve().parent.parent / "scripts"))
+        import refresh_corpus
+        spec = _json.loads((_Path(__file__).resolve().parent.parent / "ops"
+                            / "protected_services.json").read_text(encoding="utf-8"))
+        expect = spec["services"]["cnu-rule-compass"]["expect"]
+        got = refresh_corpus.declared_scaling()
+        self.assertEqual(got["min_instances"], str(expect["min_instances"]))
+        self.assertEqual(got["concurrency"], str(expect["concurrency"]))
+        src = (_Path(refresh_corpus.__file__)).read_text(encoding="utf-8")
+        self.assertNotIn('"--min-instances=1 "', src)

@@ -85,6 +85,18 @@ def _service_version() -> str:
 SERVICE_VERSION = _service_version()
 
 
+def declared_scaling(service: str = "cnu-rule-compass") -> dict:
+    """배포 명령에 박을 min-instances·동시성은 ops/protected_services.json 이 진본이다.
+
+    2026-11-02 min 1→0 결정 뒤에도 이 스크립트가 `--min-instances=1` 을 하드코딩해
+    리포트에 적고 있었다 — 그대로 따라 치면 결정이 조용히 되돌아간다.
+    """
+    spec = json.loads((ROOT / "ops" / "protected_services.json").read_text(encoding="utf-8"))
+    expect = spec["services"][service]["expect"]
+    return {"min_instances": str(expect["min_instances"]),
+            "concurrency": str(expect["concurrency"])}
+
+
 def corpus_summary() -> dict:
     rows = json.loads(CORPUS.read_text(encoding="utf-8"))
     return {"조문": len(rows), "규정": len({r["규정명"] for r in rows})}
@@ -127,10 +139,10 @@ def reconcile_names() -> dict:
     여기서 직접 받는다 — 대사가 수집보다 먼저여야 하기 때문이다.
     """
     sys.path.insert(0, str(ROOT))
-    from collect_rules import LIST_URL, http_get, parse_rule_list  # noqa: E402
+    from collect_rules import LIST_URL, http_get_retry, parse_rule_list  # noqa: E402
     from core.search import regulation_tier  # noqa: E402
 
-    payload, _ = http_get(LIST_URL, timeout=60.0)
+    payload, _ = http_get_retry(LIST_URL, timeout=60.0)
     rules = parse_rule_list(payload.decode("utf-8", errors="replace"))
     SNAPSHOT.write_text(
         json.dumps(
@@ -350,14 +362,15 @@ def _finish(report: dict, before: dict, changed: bool | None = None) -> int:
             "asia-northeast3-docker.pkg.dev/academyinfo-mcp-2026/cnu-rule-compass/"
             f"cnu-rule-compass:corpus-{datetime.date.today():%y%m%d}"
         )
+        scaling = declared_scaling()
         report["배포_명령"] = (
             f"gcloud builds submit --tag {image} --region=asia-northeast3 . && "
             f"gcloud run deploy cnu-rule-compass --region=asia-northeast3 --image={image} "
-            "--min-instances=1 "
+            f"--min-instances={scaling['min_instances']} "
             # 동시성 상한도 박는다(2026-09-25). 512Mi 는 동시성 40에서 잰 메모리가
             # 근거다 — ops/protected_services.json why_resources. 생략하면 기존 값이
             # 유지되지만, 명령만 보고 새 서비스를 만드는 사람은 기본값 80을 받는다.
-            "--concurrency=40 "
+            f"--concurrency={scaling['concurrency']} "
             # ★ 이 레포는 2026-09-07(P04)부터 adapter다. 엔진이 wheel로 빠지면서
             # SERVER_VERSION 하드코딩이 사라졌다 — 이 변수를 빠뜨리면 /health가
             # 코어 엔진 버전(0.6.x)을 말한다. 빌드도 기동도 정상이라 배포 로그로는
@@ -366,7 +379,7 @@ def _finish(report: dict, before: dict, changed: bool | None = None) -> int:
             f"--update-env-vars RULE_COMPASS_SERVER_VERSION={SERVICE_VERSION} "
             "--quiet"
         )
-        # min-instances는 상시 가동 정책(2026-08-19 확정)이다. 배포 시 명시하지 않으면
+        # min-instances는 ops/protected_services.json 선언값이다(2026-11-02 min=0). 배포 시 명시하지 않으면
         # 기존 설정이 유지되지만, 명령만 보고 따라 하는 사람이 빠뜨리지 않게 박아 둔다.
         # ⚠️ deploy 성공 메시지를 믿지 말 것 (2026-09-02 실측).
         #
@@ -392,7 +405,7 @@ def _finish(report: dict, before: dict, changed: bool | None = None) -> int:
         # 검증 배포는 아래를 쓰고, 끝나면 태그를 뗀다:
         #     scripts/revision_tag_guard.sh deploy <svc> <image> <tag>   # min-instances=0 강제
         #     scripts/revision_tag_guard.sh audit                        # 누수 상시 감사
-        # (위 report["배포_명령"]의 --min-instances=1 은 *운영* 리비전 정책이라 유효하다.)
+        # (위 report["배포_명령"]의 --min-instances 는 *운영* 리비전 선언값이라 유효하다.)
         report["배포_후_확인"] = (
             "curl -s https://cnu-rule-compass-433006350023.asia-northeast3.run.app/health "
             f"# articles가 {after['조문']}건 아니면 트래픽이 안 옮겨간 것이다. "

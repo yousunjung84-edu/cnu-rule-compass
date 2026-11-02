@@ -29,7 +29,7 @@ sys.path.insert(0, str(ROOT))
 from collect_rules import (  # noqa: E402
     LIST_URL,
     download_with_retry,
-    http_get,
+    http_get_retry,
     parse_rule_list,
     run_kordoc,
     split_articles,
@@ -43,7 +43,7 @@ FAILURES = ROOT / "data" / "failures_full.jsonl"
 
 
 def fetch_listing() -> list:
-    payload, _ = http_get(LIST_URL, timeout=60.0)
+    payload, _ = http_get_retry(LIST_URL, timeout=60.0)
     rules = parse_rule_list(payload.decode("utf-8", errors="replace"))
     SNAPSHOT.write_text(
         json.dumps(

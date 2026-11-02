@@ -234,6 +234,32 @@ def http_get(url: str, timeout: float = 60.0) -> tuple[bytes, str]:
         return response.read(), response.headers.get("Content-Type", "")
 
 
+def http_get_retry(url: str, timeout: float = 60.0, retries: int = 2,
+                   backoff: float = 10.0) -> tuple[bytes, str]:
+    """일시 장애만 재시도하는 http_get (게시 목록용).
+
+    2026-11-01 월간 갱신이 목록 요청 한 번의 시간 초과로 통째로 실패했다 —
+    같은 URL이 이튿날 1.3초에 응답했다. 4xx는 재시도해도 바뀌지 않으므로
+    바로 올린다. 마지막 예외는 삼키지 않는다(일시 장애가 다른 것으로 둔갑한다).
+    """
+    for attempt in range(retries + 1):
+        try:
+            return http_get(url, timeout=timeout)
+        except HTTPError as exc:
+            if exc.code < 500 or attempt == retries:
+                raise
+            reason = f"HTTP {exc.code}"
+        except (URLError, TimeoutError, ConnectionError, OSError) as exc:
+            if attempt == retries:
+                raise
+            reason = str(exc)
+        wait = backoff * (2 ** attempt)
+        logging.warning("[재시도] %s (%d/%d, %.0f초 뒤): %s",
+                        url, attempt + 1, retries + 1, wait, reason)
+        time.sleep(wait)
+    raise AssertionError("unreachable")
+
+
 def download_with_retry(
     url: str,
     destination: Path,
