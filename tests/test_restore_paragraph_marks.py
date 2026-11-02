@@ -36,6 +36,19 @@ class InsertMarksTest(unittest.TestCase):
         new, added = m.insert_marks(old, "유지한다.\n② 연구 중점 교수는")
         self.assertEqual((new, added), (old, []))
 
+    def test_context_mismatch_is_not_inserted(self):
+        # Codex 검증 #3: 다른 조문(제8조)의 번호를 제9조에 붙이면 안 된다
+        new, added = m.insert_marks("제9조 항에 따른다.", "제8조 ②항에 따른다.")
+        self.assertEqual((new, added), ("제9조 항에 따른다.", []))
+
+    def test_annex_numbers_are_out_of_scope(self):
+        # Codex 검증 #2: 본칙에 붙어 온 【별표】 안의 번호는 넣지 않는다
+        old = "시행한다.\n총장은 정한다.\n【별표 1】\n심사 기준\n여행의 필요성"
+        fresh = "시행한다.\n② 총장은 정한다.\n【별표 1】\n심사 기준\n① 여행의 필요성"
+        new, added = m.insert_marks(old, fresh)
+        self.assertEqual(added, ["②"])
+        self.assertIn("\n여행의 필요성", new)
+
     def test_invariant_rejects_text_change(self):
         self.assertFalse(m.only_mark_inserts("총장은 둔다.", "② 총장은 두어야 한다."))
 

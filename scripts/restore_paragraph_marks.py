@@ -70,14 +70,25 @@ def insert_marks(old: str, fresh: str) -> tuple[str, list[str]]:
     b = [(j, ch) for j, ch in enumerate(plain) if not ch.isspace()]
     a_txt = "".join(ch for _, ch in a)
     b_txt = "".join(ch for _, ch in b)
+    annex = ANNEX_HEAD.search(old)
+    annex_at = annex.start() if annex else len(old)
     inserts: list[tuple[int, str]] = []
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a_txt, b_txt, autojunk=False).get_opcodes():
         seg = b_txt[j1:j2]
         if tag != "insert" or not seg or MARK.sub("", seg):
             continue  # 그 밖의 차이(장 제목 꼬리·글자 차이)는 무시한다 — 기존 본문을 지킨다.
+        # 앞뒤 문맥이 양쪽에서 같을 때만 넣는다 — 「제9조 항」에 새판 「제8조 ②항」의
+        # ② 를 붙이면 문자 보존 검사는 통과하지만 인용이 틀린다(Codex 검증 #3).
+        if (a_txt[max(0, i1 - CONTEXT):i1] != b_txt[max(0, j1 - CONTEXT):j1]
+                or a_txt[i1:i1 + CONTEXT] != b_txt[j2:j2 + CONTEXT]):
+            continue
         end = b[j2 - 1][0] + 1
         space = " " if end < len(plain) and plain[end].isspace() else ""
         pos = a[i1][0] if i1 < len(a) else len(old)
+        if pos > annex_at:
+            # 본칙 레코드에 붙어 온 별표·별지의 번호는 항 번호가 아니다(Codex 검증 #2:
+            # 국외여행 업무처리지침 제23조 뒤 【별표 1】 ①~⑥). 범위 밖이라 넣지 않는다.
+            continue
         inserts.append((pos, seg + space))
     out, last, added = [], 0, []
     for pos, piece in inserts:
@@ -87,6 +98,10 @@ def insert_marks(old: str, fresh: str) -> tuple[str, list[str]]:
     out.append(old[last:])
     return "".join(out), added
 
+
+# 줄 머리에서 시작하는 별표·별지·서식 머리. 본문 속 「[별표 1]에 따른다」 같은 참조는 제외된다.
+ANNEX_HEAD = re.compile(r"(?m)^[ \t]*[\[【〔<][ \t]*(?:별표|별지|서식)")
+CONTEXT = 6  # 삽입 자리 앞뒤로 같아야 하는 글자 수(공백 제외)
 
 INSERT_ONLY = re.compile(r"^[\u2460-\u2473]+ ?$")
 
