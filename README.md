@@ -65,6 +65,15 @@ claude mcp add --transport stdio cnu-rule-compass --scope user \
 claude mcp list    # cnu-rule-compass: ... - ✓ Connected
 ```
 
+설치 없이 원격 서버에 붙이려면(AIONI·claude.ai 커넥터 등) 아래 주소를 등록한다.
+인증은 없고 공개 규정만 제공한다(Streamable HTTP, 서버→클라이언트 대기 스트림 GET은 405).
+
+```json
+{
+  "url": "https://cnu-rule-compass-433006350023.asia-northeast3.run.app/mcp"
+}
+```
+
 ## 안전 경계
 
 - 검색 로더는 빈 본문, 30,000자 초과 본문, 동일 레코드 중복, 비공식 URL을 제외한다.

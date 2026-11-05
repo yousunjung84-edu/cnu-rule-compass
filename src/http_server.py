@@ -35,6 +35,27 @@ from src.usage import use_stdout_for_usage
 from src.usage import wrap as usage_wrapper
 
 DEFAULT_PORT = 8080
+MCP_PATH = "/mcp"
+
+
+def reject_standalone_get(app):
+    """GET /mcp(서버→클라이언트 대기 스트림)를 405로 즉시 거절한다.
+
+    stateless 서버는 이 스트림으로 보낼 것이 없어 빈 SSE를 연 채 둔다. 로컬에서는
+    헤더가 바로 가지만 Cloud Run을 거치면 첫 바이트 전까지 헤더조차 전달되지 않아
+    (11/5 실측 time_starttransfer 0) GET 응답을 기다리는 클라이언트(AIONI)가 멈춘다.
+    Streamable HTTP 규격은 스트림을 제공하지 않는 서버의 405 응답을 허용한다.
+    """
+
+    async def wrapped(scope, receive, send):
+        if scope["type"] == "http" and scope["method"] == "GET" and scope["path"].rstrip("/") == MCP_PATH:
+            await send({"type": "http.response.start", "status": 405,
+                        "headers": [(b"allow", b"POST, DELETE"), (b"content-length", b"0")]})
+            await send({"type": "http.response.body", "body": b""})
+            return
+        await app(scope, receive, send)
+
+    return wrapped
 
 
 def read_allowed_hosts(value: str | None = None) -> list[str]:
@@ -101,7 +122,11 @@ def main() -> int:
         print(f"[오류] {exc}", file=sys.stderr)
         return 1
     try:
-        server.run(transport="streamable-http")
+        import uvicorn
+
+        uvicorn.run(reject_standalone_get(server.streamable_http_app()),
+                    host=server.settings.host, port=server.settings.port,
+                    log_level=server.settings.log_level.lower())
     except Exception as exc:
         print(f"[오류] HTTP MCP 서버 실행 실패: {exc}", file=sys.stderr)
         return 1
