@@ -186,6 +186,30 @@
    "digest": "sha256:74292a5bd040daa5a84c68406ed2acbed8dcc18faf144f319b0b1edd890c7bf8",
    "verified_by": "범위(삭제 41·수정 12·그 밖 0), unittest 94 OK, Codex 교차검정 task-mwa6khzp→task-mwa6upu6 전 항목 해결, 운영 URL health 1.10.9 articles 17738·rules 838·현행 413, 수정 행 7건 get_article 확인, 태그 제거·drift 0·누수 0",
    "known_gaps": "삭제 표기 변형 미판정(협동과정 운영지침 제3조·문화전문대학원 제21조 + 후보 15, 코어 정규식) · 전화회선 제9조 부칙 혼입(W2-c) · 구조 어댑터 날짜만 표시 미복원"
+  },
+  {
+   "date": "2026-11-10",
+   "service_version": "1.10.10",
+   "change": "W3 Phase A 규정 단위 「최근 개정일」 필드: 현행 413 중 405규정(규정 273 법제처 그 판본 머리글·지침 132 구판 「개정전」 표기/원문 부칙/원문 제·개정 이력 줄)에 규정_최근개정일·규정_개정구분·규정_시행일·규정_개정일_근거 부착(6,329행). 출처 없음 8은 미부착, 출처 불일치 9는 최신값+전 날짜 병기. 필드 외 변경 0. scripts/fetch_regulation_heads.py·annotate_revision_dates.py(미커밋).",
+   "inputs_sha256": {
+    "data/rules_corpus.json": "27948c4db1ee85134bfe93bcfd48fad2461e781ab4a81857a38399fa829c15a1",
+    "data/lineage_corpus.json": "5c8034051143806a400a728b94cdc3d7df75450ed23b8dd92a5832f67827baa2",
+    "data/integrity_selfcheck_samples.json": "88eb2155b4da7fff6ed071260549be25e4a3b050fa6888056775299d34a70766",
+    "data/coverage_report.json": "2401a2df37634da6051537b8de398337c0bcdabb91b59e2f86a9500279b08506",
+    "data/regulation_heads.json": "f9f22391c0c66a766bdd619ac9959bb2ce995830568b5024a119400ad90f9ddf"
+   },
+   "change_gate": {
+    "fingerprint": null,
+    "risks": "0",
+    "현행_계열": "413→413",
+    "approved_by": "박사 2026-11-10 「1.10.10 배포 진행해줘」"
+   },
+   "rollback": "cnu-rule-compass-00066-kul (1.10.9)",
+   "revision": "cnu-rule-compass-00069-wos",
+   "image": "cnu-rule-compass:v1.10.10",
+   "digest": "sha256:d1f7c20ffd09dcc70302ca8b5ad9e92f95ee4c8e1ba7db01188fb63f1ed8a7ec",
+   "verified_by": "학사24 22/24(#5 개정안·#20 원문 날짜 없음), Codex 봉인 교차검증 task-mwa922ux(44)·task-mwa97qzj(34) 날짜 일치(원문 내 충돌 4610·5055 병기), unittest 112 OK, 운영 URL health 1.10.10 articles 17738·rules 838, get_article·search_rule 필드 노출·구판 미부착 확인, 태그 제거·drift 0·누수 0",
+   "known_gaps": "list_rules·list_articles 미노출(코어 Phase B) · AIONI 지침 v3.7 미적용 · 원문 내 날짜 충돌 9건 원문 확인 필요"
   }
  ]
 }

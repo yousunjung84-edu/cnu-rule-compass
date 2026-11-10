@@ -53,3 +53,4 @@ data/rules_corpus.json.*
 data/reparse_evidence_*.json
 data/reparse_removed.json
 data/rules_corpus.json.pre_*
+data/regulation_heads.json

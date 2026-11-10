@@ -99,7 +99,14 @@ def declared_scaling(service: str = "cnu-rule-compass") -> dict:
 
 def corpus_summary() -> dict:
     rows = json.loads(CORPUS.read_text(encoding="utf-8"))
-    return {"조문": len(rows), "규정": len({r["규정명"] for r in rows})}
+    # 개정일 필드만 바뀐 갱신도 「배포 필요」여야 한다. 조문·규정 수만 보면 「변경 없음·배포
+    # 불필요」로 떨어진다(2026-11-10 Codex 코드 리뷰 #9). 필드 값의 지문을 함께 비교한다.
+    import hashlib
+
+    dates = sorted((str(r.get("record_id")), str(r.get("규정_최근개정일")), str(r.get("규정_개정구분")),
+                    str(r.get("규정_개정일_근거"))) for r in rows if r.get("규정_최근개정일"))
+    return {"조문": len(rows), "규정": len({r["규정명"] for r in rows}),
+            "개정일_지문": hashlib.sha256(json.dumps(dates, ensure_ascii=False).encode()).hexdigest()[:16]}
 
 
 def build_current_map(path, raw: list[dict]) -> dict:
@@ -261,6 +268,9 @@ def main() -> int:
             ("별표", [PY, "scripts/collect_attachments.py"]),
             ("별표제목", [PY, "scripts/fill_attachment_titles.py", "--apply"]),
             ("항목식", [PY, "scripts/collect_item_style.py"]),
+            # 규정 단위 「최근 개정일」(W3 Phase A, 2026-11-10). 수집 뒤에 붙여야
+            # 새로 들어온 판본까지 덮는다. 규정 머리글은 fetch_regulation_heads.py 결과를 쓴다.
+            ("개정일", [PY, "scripts/annotate_revision_dates.py"]),
             ("대조표", [PY, "scripts/coverage_report.py"]),
         ]
         for name, args in steps:
@@ -268,6 +278,8 @@ def main() -> int:
             if result.returncode != 0:
                 raise RuntimeError(f"{name} 실패 (exit {result.returncode}): {result.stderr[-400:]}")
             log(f"[완료] {name}")
+            if name == "개정일":  # 부착 통계(출처 없음·날짜 불일치 수)를 로그에 남긴다
+                log("[개정일] " + " ".join(result.stdout.split())[:400])
 
         gate = run([PY, "-m", "unittest", "discover", "-s", "tests", "-t", "."], timeout=1800)
         tail = (gate.stderr or gate.stdout).strip().splitlines()[-1] if (gate.stderr or gate.stdout) else ""
