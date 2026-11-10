@@ -55,11 +55,12 @@ def fetch(url: str, data: dict | None = None, referer: str | None = None, timeou
 
 def html_to_text(document: str) -> str:
     document = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", "\n", document)
-    # 엔티티를 먼저 푼 뒤 태그를 지운다. 순서를 뒤집으면 '&lt;td&gt;'처럼 이스케이프된
-    # 마크업이 태그 제거를 피해 갔다가 본문에 되살아난다(현재 소스에서는 미발현이나
-    # 잠재 결함이라 순서를 고정한다).
-    text = html.unescape(document)
-    text = re.sub(r"<[^>]+>", "\n", text)
+    # 실제 태그를 먼저 제거해야 &lt;삭제 …&gt; 등 조문 표시가 보존된다.
+    # 엔티티 해제 뒤에는 ASCII 태그만 제거해 &lt;td&gt;의 부활도 막는다.
+    ascii_tag = r"</?[A-Za-z][A-Za-z0-9:_-]*(?:\s[^>]*|/?)>"
+    text = re.sub(r"(?s)<!--.*?-->|<![^>]*>|" + ascii_tag, "\n", document)
+    text = html.unescape(text)
+    text = re.sub(ascii_tag, "\n", text)
     lines = []
     for line in text.splitlines():
         line = line.strip()

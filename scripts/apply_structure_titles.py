@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import shutil
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -22,9 +23,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # site-packages 옆을 보고 못 찾는다(2026-09-07 P04). 명시 지정이 있으면 존중한다.
 os.environ.setdefault("RULE_COMPASS_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))
 from core.search import prepare_article  # noqa: E402
-from core.structure import apply_to_corpus  # noqa: E402
+from core.structure import ANNOTATION_RE, SECTION_RE, apply_to_corpus  # noqa: E402
 
 CORPUS = Path(__file__).resolve().parent.parent / "data" / "rules_corpus.json"
+
+
+ARTICLE_MARK_RE = re.compile(r"\s*<(?:[가-힣]*개정|삭제|신설)[^>\n]*>\s*")
+
+
+def restore_article_marks(original: str, processed: str) -> str:
+    """제거된 꼬리의 첫 장/절 제목 *앞*에 있던 조문 표시만 되살린다.
+
+    제목 자체·제목 뒤 주석은 편제 소속이다. 원문의 나머지 본문이 코어
+    결과와 일치할 때만 복원하여, 이미 보존된 표시를 중복 추가하지 않는다.
+    """
+    lines = original.split("\n")
+    start = 0
+    while start < len(lines) and (not lines[start].strip() or SECTION_RE.match(lines[start])):
+        start += 1
+    end = len(lines)
+    while end > start and (
+        not lines[end - 1].strip()
+        or ANNOTATION_RE.match(lines[end - 1])
+        or SECTION_RE.match(lines[end - 1])
+    ):
+        end -= 1
+    heading = next((i for i in range(end, len(lines)) if SECTION_RE.match(lines[i])), None)
+    if heading is None or processed.strip() != "\n".join(lines[start:end]).strip():
+        return processed
+    marks = [line.strip() for line in lines[end:heading] if ARTICLE_MARK_RE.fullmatch(line)]
+    return "\n".join(part for part in (processed.rstrip(), *marks) if part) if marks else processed
 
 
 def main() -> int:
@@ -41,11 +69,21 @@ def main() -> int:
         frozen += 1
 
     before_ids = [a["record_id"] for a in corpus]
+    # 코어가 향후 입력을 제자리 수정해도 비교할 원 본문은 보존한다.
+    before_bodies = [str(a.get("본문", "")) for a in corpus]
     processed, stats = apply_to_corpus(corpus)
     after_ids = [a["record_id"] for a in processed]
     if before_ids != after_ids:
         print("[중단] record_id가 변동했습니다 — 적용하지 않았습니다.", file=sys.stderr)
         return 1
+
+    restored = 0
+    for original, article in zip(before_bodies, processed):
+        body = restore_article_marks(original, article["본문"])
+        restored += body != article["본문"]
+        article["본문"] = body
+    stats["조문표시_복원"] = restored
+    stats["본문_변경"] = sum(b != a["본문"] for b, a in zip(before_bodies, processed))
 
     backup = CORPUS.with_suffix(".json.pre_structure")
     if not backup.exists():
