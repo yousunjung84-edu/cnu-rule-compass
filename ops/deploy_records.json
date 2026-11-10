@@ -124,6 +124,68 @@
    "build_id": "f4e4f712-bf41-42ac-947c-6da2282aef95",
    "health": "1.10.6 · articles 17126 · rules 819",
    "verified_by": "digest 지정 무트래픽 배포 → 리비전 설정 확인(min 미설정=0·1vCPU·512Mi·conc 40·ALLOWED_HOSTS·VERSION 1.10.6) → update-traffic 100%. 운영 URL GET /mcp 405(0.07초) · TS SDK 1.32.2 클라이언트 연결→GET 405→tools/list 7→search_rule 성공(0.73초) · claude.ai 커넥터 search_rule 정상. AIONI 실측은 박사 질의 대기"
+  },
+  {
+   "date": "2026-11-10",
+   "service_version": "1.10.7",
+   "change": "학사과 학사 규정·지침 24건 검증 후속 F1·F2. F1: 「전남대학교 특별학기 운영 규정」 law.go.kr 2020.7.1판(seq 2200000083359, 제1781호) 본칙 7조문 편입, 2017.10.30판(2200000070397) 7조문은 「(2020. 7. 1. 개정전)」로 강등(학교 규정집이 옛 판 링크). F2: 「수업관리 지침」(key 4908) 2020.11.13 부칙 적용례 + 2020.12.1~2025.10.1 부칙 14개를 원본 md에서 레코드 1개로 임시 복구(rule-4908-9e6e03b6a0a94642; 원인=attachment_cut이 별표 표식을 몰라 마지막 조문이 부칙·별표를 삼킴). coverage_report는 운영판 유지. unittest 94 OK·change-gate 위험 0·현행 420→420",
+   "inputs_sha256": {
+    "data/rules_corpus.json": "d32c6aab653d78f065040a61103bb9cfd5612d54401b7531f6f9b2970ed395df",
+    "data/lineage_corpus.json": "5c8034051143806a400a728b94cdc3d7df75450ed23b8dd92a5832f67827baa2",
+    "data/integrity_selfcheck_samples.json": "88eb2155b4da7fff6ed071260549be25e4a3b050fa6888056775299d34a70766",
+    "data/coverage_report.json": "2401a2df37634da6051537b8de398337c0bcdabb91b59e2f86a9500279b08506"
+   },
+   "rollback": "cnu-rule-compass-00042-4bb (1.10.6)",
+   "revision": "cnu-rule-compass-00059-wul",
+   "image": "cnu-rule-compass:v1.10.7",
+   "digest": "sha256:079751027ad960662bc4b8a87a3565415df0c5b57417960f05bd86f3d5bf2971",
+   "verified_by": "태그 v1101(min0, 트래픽0) → 운영 URL: /health 1.10.7 articles 17134(+8)·rules 820(+1), get_article 특별학기 제5조 2020판 단서, list_rules 현행 420, F2 record get_article·search 적중. 태그 제거·drift 0·누수 0",
+   "note": "검증 태그는 ALLOWED_HOSTS 등록 이름(v1101) 재사용 — 새 태그명은 421"
+  },
+  {
+   "date": "2026-11-10",
+   "service_version": "1.10.8",
+   "change": "W1-b 규정 계층 구판 25건: 법제처 연혁(schlPubRulHstListR.do) 전수 대조 281건 중 구판 25(학교 규정집이 옛 판 링크). 개정 18 = 최신판 본칙 603조문 편입·구판 「(공포일 개정전)」 강등(학칙·교원/강사/비전임교원 인사·조직 설치 등 2026년 개정 13), 실제 개명 3(기초과학연구원·수리데이터과학연구소·전남 앵커 사업단)은 새 이름 현행. 폐지 7 = 「(공포일 폐지)」 표기로 현행 제외. 변환은 HTML 태그만 지우고 <개정·삭제·신설> 표시 보존(collect_regulations.html_to_text는 엔티티 해제 뒤 태그 제거라 표시를 지움), 괄호 중첩 제목은 원문 줄에서 복원, apply_structure_titles가 함께 지운 조문 끝 표시 5행 복구. 부칙·별표는 규정 계층 기존 수준(없음).",
+   "inputs_sha256": {
+    "data/rules_corpus.json": "e62610df28bf4ae7f77880fba5defd60dd1a9bd27022c35d480770e552a1fe59",
+    "data/lineage_corpus.json": "5c8034051143806a400a728b94cdc3d7df75450ed23b8dd92a5832f67827baa2",
+    "data/integrity_selfcheck_samples.json": "88eb2155b4da7fff6ed071260549be25e4a3b050fa6888056775299d34a70766",
+    "data/coverage_report.json": "2401a2df37634da6051537b8de398337c0bcdabb91b59e2f86a9500279b08506"
+   },
+   "change_gate": {
+    "fingerprint": "04bd7abd78ee",
+    "risks": "current_zero 10 = 폐지 7 + 개명 3(옛 이름 계열 종료)",
+    "현행_계열": "420→413",
+    "approved_by": "박사 2026-11-10 「구판 25건도 이어서 해줘」(폐지 7·개명 포함 목록 보고 후)"
+   },
+   "rollback": "cnu-rule-compass-00059-wul (1.10.7)",
+   "revision": "cnu-rule-compass-00063-kis",
+   "image": "cnu-rule-compass:v1.10.8",
+   "verified_by": "범위 증명(25규정 밖 16,688행 불변·강등 667행 규정명만 변경·603행 추가), unittest 94 OK, Codex 독립 전수 대조 2회(task-mwa3ntf8 불합격 → 수정 → task-mwa40mcj 602/603, 남은 1건 수정), 운영 URL: health 1.10.8 articles 17737·rules 838·현행 413, 25건 현행/폐지 판정 이상 0, 삭제 조문 is_repealed, 폐지 규정 기본검색 노출 0. 태그 제거·drift 0·누수 0",
+   "known_gaps": "개명 구판 32행 superseded_by 없음 · 조문 삭제일 repealed_date 미추출(코어) · 규정 계층 부칙·별표 없음 · coverage_report 미갱신(7월 스냅샷 분모)"
+  },
+  {
+   "date": "2026-11-10",
+   "service_version": "1.10.9",
+   "change": "W2-f 현행 결함 소급(실제 48행): 방사선안전관리지침(5055) 목차 41행 삭제(빈 37+검색 노출 쓰레기 4)·부칙 레코드 별첨 혼입 절단(35,286→271자, 적재 복구), 괄호 제목 7(지침 2·법제처 5, 학사#12 창의융합학부 운영규정 제6조 포함), <삭제> 복원 2, 빈 본문 실조문 복원 2(명예졸업증서 제7조·법학전문대학원교학규정 제26조의5). 제목 '삭제' 빈 본문 6행은 코어가 이미 적재·삭제 판정 → 원복. 수집기 수정 df16794(W2-e) 기반.",
+   "inputs_sha256": {
+    "data/rules_corpus.json": "4ab2311e2f4ccb6a4475400fe394a9dbcb52f7580d856228956be694c88ad2bf",
+    "data/lineage_corpus.json": "5c8034051143806a400a728b94cdc3d7df75450ed23b8dd92a5832f67827baa2",
+    "data/integrity_selfcheck_samples.json": "88eb2155b4da7fff6ed071260549be25e4a3b050fa6888056775299d34a70766",
+    "data/coverage_report.json": "2401a2df37634da6051537b8de398337c0bcdabb91b59e2f86a9500279b08506"
+   },
+   "change_gate": {
+    "fingerprint": "25c05b329d6d",
+    "risks": "article_loss·current_article_loss(방사선 목차 제거) + current_promotion 5(빈 본문 해소)",
+    "현행_계열": "413→413",
+    "approved_by": "박사 2026-11-10 「1.10.9 배포 진행해줘」"
+   },
+   "rollback": "cnu-rule-compass-00063-kis (1.10.8)",
+   "revision": "cnu-rule-compass-00066-kul",
+   "image": "cnu-rule-compass:v1.10.9",
+   "digest": "sha256:74292a5bd040daa5a84c68406ed2acbed8dcc18faf144f319b0b1edd890c7bf8",
+   "verified_by": "범위(삭제 41·수정 12·그 밖 0), unittest 94 OK, Codex 교차검정 task-mwa6khzp→task-mwa6upu6 전 항목 해결, 운영 URL health 1.10.9 articles 17738·rules 838·현행 413, 수정 행 7건 get_article 확인, 태그 제거·drift 0·누수 0",
+   "known_gaps": "삭제 표기 변형 미판정(협동과정 운영지침 제3조·문화전문대학원 제21조 + 후보 15, 코어 정규식) · 전화회선 제9조 부칙 혼입(W2-c) · 구조 어댑터 날짜만 표시 미복원"
   }
  ]
 }
