@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 import shutil
 import subprocess
 import os
@@ -42,6 +43,26 @@ SNAPSHOT = ROOT / "data" / "listing_snapshot_latest.json"
 LOG = ROOT / "data" / "corpus_refresh.log"
 REPORT = ROOT / "data" / "corpus_refresh_report.json"
 CANDIDATE = CORPUS.with_suffix(".json.candidate")      # 승인 대기 중인 새 코퍼스
+FAILURES = ROOT / "data" / "failures_full.jsonl"
+KNOWN_FAILURES = ROOT / "ops" / "collect_known_failures.json"
+HEADS = ROOT / "data" / "regulation_heads.json"
+# 구판본 규정명 판정은 코어(0.7.1+)의 전남대 관습 함수를 그대로 쓴다(2026-11-11). 이 저장소에
+# 따로 식을 두었더니 코어와 판정이 10건 갈렸다(연도 단독 꼬리·연도 접두·중첩 괄호, Codex 리뷰).
+# 「판이 하나뿐인 (날짜 제정)」 예외는 코어 프로필 명단(single_edition_current)에만 있다.
+def listed_editions() -> dict[str, set[str]]:
+    """게시 목록 스냅샷의 규정명 → source_key들. 없으면 판정을 못 하므로 멈춘다."""
+    out: dict[str, set[str]] = {}
+    for row in json.loads(SNAPSHOT.read_text(encoding="utf-8")):
+        out.setdefault(row["name"], set()).add(str(row["key"]))
+    return out
+
+
+def past_names(editions: dict[str, set[str]]) -> set[str]:
+    """괄호 꼬리 + 연도 접두 계열로 구판본인 규정명 (코어 _annotate_versions와 같은 기준)."""
+    from core.search import tail_superseded_names, year_prefix_demoted  # noqa: E402
+
+    return tail_superseded_names(editions) | set(year_prefix_demoted(set(editions)))
+
 PENDING = ROOT / "data" / "pending_change_report.json"  # 승인 대기 change-set 보고서
 
 
@@ -50,6 +71,43 @@ def log(msg: str) -> None:
     print(line, flush=True)
     with LOG.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
+
+
+REQUIREMENTS_CORE = ROOT / "requirements-core.txt"
+MIN_CORE = (0, 7, 1)  # past_names·유일 판 명단(single_edition_current)이 들어간 코어
+
+
+def _release(version: str) -> tuple[int, int, int] | None:
+    """정식판 '0.7.1'만 (0, 7, 1) — rc·dev·post 같은 시험판·덧판은 None."""
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def check_core_version() -> str:
+    """수집 환경(.venv) 코어 == 배포 고정 코어 >= 0.7.1(정식판) 이어야 갱신한다 (2026-11-11, Codex 리뷰).
+
+    수집은 0.7.1로 항목을 넣고 배포 색인은 0.7.0으로 지으면, 넣은 항목이 서버에서 다시
+    구판으로 판정된다. 반대로 .venv가 낮으면 구판 판정 함수를 못 불러 갱신이 중간에 죽는다.
+    구판 판정 일부(past_names·대사)는 이 스크립트를 띄운 파이썬에서 돌므로, 그 파이썬과
+    .venv가 **같은 코어 파일**을 쓰는지도 본다(다른 파이썬으로 손수 돌린 경우).
+    """
+    pinned_match = re.search(r"^\s*rule-compass-core\s*==\s*([^\s\\;#]+)",
+                             REQUIREMENTS_CORE.read_text(encoding="utf-8"), re.M)
+    pinned = pinned_match.group(1) if pinned_match else ""
+    probe = "import core, importlib.metadata as m; print(m.version('rule-compass-core')); print(core.__file__)"
+    got = subprocess.run([PY, "-c", probe], cwd=ROOT, capture_output=True, text=True, timeout=120)
+    lines = got.stdout.strip().splitlines() if got.returncode == 0 else []
+    installed = lines[0].strip() if lines else ""
+    if not pinned or installed != pinned:
+        raise RuntimeError(f"코어 버전 불일치: 수집 환경 {installed or '확인 불가'} · 배포 고정 {pinned or '없음'}")
+    release = _release(pinned)
+    if release is None or release < MIN_CORE:
+        raise RuntimeError(f"코어 {pinned}는 {'.'.join(map(str, MIN_CORE))} 이상 정식판이 아니다")
+    import core  # noqa: E402 — 이 파이썬이 실제로 쓰는 코어
+    child_file = lines[1].strip() if len(lines) > 1 else ""
+    if not child_file or Path(core.__file__).resolve() != Path(child_file).resolve():
+        raise RuntimeError(f"갱신 스크립트 파이썬의 코어({core.__file__})와 수집 환경 코어({child_file or '확인 불가'})가 다르다")
+    return installed
 
 
 def run(args: list[str], timeout: int = 3600) -> subprocess.CompletedProcess:
@@ -105,8 +163,79 @@ def corpus_summary() -> dict:
 
     dates = sorted((str(r.get("record_id")), str(r.get("규정_최근개정일")), str(r.get("규정_개정구분")),
                     str(r.get("규정_개정일_근거"))) for r in rows if r.get("규정_최근개정일"))
-    return {"조문": len(rows), "규정": len({r["규정명"] for r in rows}),
+    # 본문을 포함한 전체 레코드를 정렬해 직렬화한다. 행·키 순서만 바뀌면 같은 지문이다.
+    serialized = [json.dumps(r, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                  for r in rows]
+    ordered = sorted(zip(rows, serialized), key=lambda pair: (str(pair[0].get("record_id", "")), pair[1]))
+    digest = hashlib.sha256(("[" + ",".join(value for _, value in ordered) + "]").encode()).hexdigest()
+    return {"본문_지문": digest, "조문": len(rows), "규정": len({r["규정명"] for r in rows}),
             "개정일_지문": hashlib.sha256(json.dumps(dates, ensure_ascii=False).encode()).hexdigest()[:16]}
+
+
+NO_ARTICLE_ERROR = "제N조 패턴을 찾지 못함"  # 변환은 됐는데 조문 구조가 아닌 경우만 항목식이 받는다
+
+
+def item_editions() -> set[tuple[str, str]]:
+    """코퍼스의 항목식 판본 (source_key, 규정명)."""
+    return {(str(row.get("source_key")), str(row.get("규정명")))
+            for row in json.loads(CORPUS.read_text(encoding="utf-8")) if row.get("record_type") == "항목"}
+
+
+def collection_failures(items_before: set[tuple[str, str]] | None = None) -> dict:
+    """실패 목록을 즉시 복사하고, 근거가 등록된 예외만 보류 대상에서 뺀다."""
+    known = json.loads(KNOWN_FAILURES.read_text(encoding="utf-8"))
+    for key, entry in known.items():
+        if not entry.get("사유", "").strip():
+            raise ValueError(f"수집 허용 목록의 사유 누락: {key}")
+        datetime.date.fromisoformat(entry["등록일"])
+    failures = [json.loads(line) for line in FAILURES.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not failures:
+        raise ValueError("부분 수집 종료 코드에 실패 목록이 없음")
+    # 배포를 막는 것은 **현행 규정**의 실패뿐이다. 구판본(개정전 등)은 기본 검색에서 빠지고
+    # 수집기도 현행을 먼저 받는다. 구판 실패까지 막으면 2026-11-11 기준 93건이 매달
+    # 재시도·실패해 보류가 상시화된다(박사 결정 (가)). 구판 실패는 경고로 남긴다.
+    # 조문 수집에 실패해도 뒤 「항목식」 단계가 번호 절로 편입하면 코퍼스에 있다(4167, 2026-11-11).
+    # 그래서 항목식 뒤에 한 번 더 부르되(items_before = 항목식 전 판본), 실패로 세지 않는 것은
+    # ① 변환까지 된 「제N조 없음」 실패이고 ② **이번 항목식 단계가** 같은 키·같은 이름으로 넣은 것뿐이다.
+    # 다운로드·변환 실패는 남아 있던 옛 마크다운으로 편입될 수 있어 복구로 치지 않는다(Codex 리뷰 high).
+    added = item_editions() - items_before if items_before is not None else set()
+    editions = listed_editions()
+    for failure in failures:  # 목록에 없는 실패 이름도 판정에 넣는다
+        editions.setdefault(str(failure.get("규정명", "")), set()).add(str(failure["source_key"]))
+    past_set = past_names(editions)
+    allowed, blocked, past, recovered = [], [], [], []
+    for failure in failures:
+        reason = known.get(str(failure["source_key"]))
+        if (failure.get("stage") == "parse" and failure.get("error") == NO_ARTICLE_ERROR
+                and (str(failure["source_key"]), str(failure.get("규정명"))) in added):
+            recovered.append(failure)
+        elif reason:
+            allowed.append({**failure, "허용_근거": reason})
+        elif str(failure.get("규정명", "")) in past_set:
+            past.append(failure)
+        else:
+            blocked.append(failure)
+    return {"실패_건수": len(failures), "실패_목록": failures,
+            "허용된 실패": allowed, "허용된 실패_건수": len(allowed),
+            "구판 실패(경고)": past, "구판 실패_건수": len(past),
+            "항목식 편입": recovered, "항목식 편입_건수": len(recovered),
+            "보류_실패": blocked, "보류_실패_건수": len(blocked)}
+
+
+def stale_regulations() -> list[dict]:
+    """개정일 부착과 같은 현행 판정으로 구판 의심 규정을 찾는다."""
+    # 실행 방식(python scripts/refresh_corpus.py)에선 sys.path[0]이 scripts/라 저장소 루트를
+    # 직접 넣는다. 앞 단계(reconcile_names)가 넣어 주는 것에 기대지 않는다.
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from scripts.annotate_revision_dates import current_rules
+
+    if not HEADS.exists():
+        return []  # 머리글 누락 여부는 뒤의 개정일 게이트가 검사한다.
+    heads = json.loads(HEADS.read_text(encoding="utf-8"))["heads"]
+    return [{**heads[key], "규정명": name, "source_key": key}
+            for name, key in sorted(current_rules(CORPUS))
+            if heads.get(key, {}).get("stale") is True]
 
 
 def build_current_map(path, raw: list[dict]) -> dict:
@@ -202,6 +331,12 @@ def _adopt_candidate(fingerprint: str) -> int:
     before = corpus_summary()
     report: dict = {"시작": started, "이전": before, "모드": "candidate_adopt",
                     "대사": {"개명": 0, "목록_소실": 0}}
+    # change-set 승인은 수집 누락·구판 보류까지 해제하는 승인이 아니다.
+    if REPORT.exists():
+        previous_report = json.loads(REPORT.read_text(encoding="utf-8"))
+        for field in ("수집", "구판 의심", "경고"):
+            if field in previous_report:
+                report[field] = previous_report[field]
     prev_rows = json.loads(CORPUS.read_text(encoding="utf-8"))
     new_rows = json.loads(CANDIDATE.read_text(encoding="utf-8"))
     ok, change = change_gate.guard(
@@ -247,12 +382,19 @@ def main() -> int:
     ap.add_argument("--approve", metavar="FINGERPRINT", default=None,
                     help="pending change-set의 fingerprint를 승인 (change_gate)")
     cli = ap.parse_args()
+    started = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    try:  # 코퍼스를 건드리기 전에 멈춘다 — 후보 승인 경로도 같은 코어여야 한다
+        core_version = check_core_version()
+    except (RuntimeError, OSError, subprocess.TimeoutExpired, ImportError) as exc:
+        log(f"[중단] {exc}")
+        REPORT.write_text(json.dumps({"시작": started, "결과": "코어 버전 불일치·갱신 중단", "오류": str(exc)},
+                                     ensure_ascii=False, indent=1), encoding="utf-8")
+        return 1
     if cli.approve and CANDIDATE.exists():
         return _adopt_candidate(cli.approve)
     if cli.approve:
         log("[승인] 보존된 후보가 없다 — 전체 재수집으로 진행 (지문은 이번 change-set과 대조)")
-    started = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
-    log("=== 코퍼스 갱신 시작 ===")
+    log(f"=== 코퍼스 갱신 시작 (코어 {core_version}) ===")
     before = corpus_summary()
     backup = CORPUS.with_suffix(f".json.refresh-backup")
     shutil.copy2(CORPUS, backup)
@@ -270,14 +412,39 @@ def main() -> int:
             ("항목식", [PY, "scripts/collect_item_style.py"]),
             # 규정 단위 「최근 개정일」(W3 Phase A, 2026-11-10). 수집 뒤에 붙여야
             # 새로 들어온 판본까지 덮는다. 규정 머리글은 fetch_regulation_heads.py 결과를 쓴다.
+            ("연혁 머리글", [PY, "scripts/fetch_regulation_heads.py"]),
             ("개정일", [PY, "scripts/annotate_revision_dates.py"]),
             ("대조표", [PY, "scripts/coverage_report.py"]),
         ]
         for name, args in steps:
-            result = run(args)
+            try:
+                result = run(args)
+            except subprocess.TimeoutExpired as exc:
+                if name != "연혁 머리글":
+                    raise
+                report.setdefault("경고", []).append(f"연혁 머리글 시간 초과 ({exc.timeout}초)")
+                report["구판 의심"] = stale_regulations()
+                log("[경고] " + report["경고"][-1])
+                continue
+            if name == "수집" and result.returncode == 3:
+                report["수집"] = collection_failures()
+                items_before = item_editions()
+                log(f"[부분 수집] 실패 {report['수집']['실패_건수']}건")
+                continue
+            if name == "연혁 머리글":
+                report["구판 의심"] = stale_regulations()
+                if result.returncode != 0:
+                    report.setdefault("경고", []).append(
+                        f"연혁 머리글 실패 (exit {result.returncode}): {(result.stderr or result.stdout)[-400:]}")
+                    log("[경고] " + report["경고"][-1])
+                    continue
             if result.returncode != 0:
                 raise RuntimeError(f"{name} 실패 (exit {result.returncode}): {result.stderr[-400:]}")
             log(f"[완료] {name}")
+            if name == "항목식" and "수집" in report:
+                report["수집"] = collection_failures(items_before)
+                log(f"[부분 수집] 항목식 편입 {report['수집']['항목식 편입_건수']}건 반영 · "
+                    f"보류 {report['수집']['보류_실패_건수']}건")
             if name == "개정일":  # 부착 통계(출처 없음·날짜 불일치 수)를 로그에 남긴다
                 log("[개정일] " + " ".join(result.stdout.split())[:400])
 
@@ -362,7 +529,15 @@ def _finish(report: dict, before: dict, changed: bool | None = None) -> int:
         changed = after != before or report["대사"]["개명"] > 0
     report["이후"] = after
     report["변경"] = {"조문": after["조문"] - before["조문"], "규정": after["규정"] - before["규정"]}
-    if changed:
+    holds = []
+    if report.get("수집", {}).get("보류_실패_건수", 0):
+        holds.append("부분 수집")
+    if report.get("구판 의심"):
+        holds.append("구판 의심")
+    if holds:
+        report["결과"] = "·".join(holds) + "·배포 보류"
+        note = report["결과"] + " — 리포트 확인 후 재수집 필요"
+    elif changed:
         report["결과"] = "성공·배포 대기"
         # 빌드는 **Cloud Build**로 한다. 이전 안내는 `docker buildx`였는데, 이 맥에는
         # Docker Desktop이 없어(=/usr/local/bin/docker 심볼릭 링크만 남음) 그대로

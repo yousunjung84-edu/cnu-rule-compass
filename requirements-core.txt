@@ -8,6 +8,8 @@
 # 일치함을 확인했다(2026-09-07 게시 직후 실측).
 # 0.7.0(2026-09-24): 재현 빌드(SOURCE_DATE_EPOCH) 로컬 == 레지스트리 표기 ==
 # 레지스트리에서 받은 사본. 게시 전에 이 바이트로 임시 서비스 검증을 마쳤다.
+# 0.7.1(2026-11-11): 재현 빌드(SOURCE_DATE_EPOCH, core 0387334) 로컬 == 레지스트리
+# 표기 == 레지스트리에서 받은 사본. 4167·3862 유일 판 현행 편입(jnu 명단).
 #
 # 갱신 절차: 코어에서 wheel을 빌드·게시한 뒤
 #   gcloud artifacts files list --repository=rule-compass-python \
@@ -18,5 +20,5 @@
 # 해시를 달아야 하고, 그 의존의 의존까지 전부 달아야 한다. 코어가
 # dependencies=[] 라서 지금은 한 줄로 끝난다 — 그 조건이 깨지면 이 파일이
 # 아니라 설치 방식을 다시 정해야 한다.
-rule-compass-core==0.7.0 \
-    --hash=sha256:a4e5a0cded32260398b9abfaa08ccc2e462a0775628ca553343a91c13b8f9af7
+rule-compass-core==0.7.1 \
+    --hash=sha256:ceceff5fd0c1d64779c8d91c71c1bbef2832f445ee4c49bc2ede93238328a218
