@@ -82,6 +82,9 @@ def main() -> int:
                 "latest_head": rows[0]["head"] if rows else None,
                 "n_versions": len(rows),
                 "stale": bool(rows) and rows[0]["seq"] != seq,
+                # 자기 판본을 확인한 경우에만 마지막 성공 시각을 갱신한다.
+                **({"fetched_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds")}
+                   if own else {}),
             }
         except Exception as exc:  # 네트워크 오류는 기록하고 계속 — 기존 정상 자료는 지킨다
             errors += 1
@@ -90,7 +93,6 @@ def main() -> int:
             print(f"{i}/{len(targets)}", flush=True)
         time.sleep(random.uniform(0.5, 1.0))
     OUT.write_text(json.dumps({
-        "수집일시": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
         "heads": heads,
     }, ensure_ascii=False, indent=1), encoding="utf-8")
     no_head = [s for s, h in heads.items() if "error" not in h and not h.get("head")]

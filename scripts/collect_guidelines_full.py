@@ -83,6 +83,8 @@ def main() -> int:
         for rule in missing:
             print(f"  - [{rule.division}] {rule.name} (key {rule.key})")
         return 0
+    # 이번 실행에서 실패가 없으면 과거 실패 목록도 비운다.
+    FAILURES.write_text("", encoding="utf-8")
     if not missing:
         print("추가할 규정이 없습니다(멱등).")
         return 0
@@ -142,7 +144,7 @@ def main() -> int:
             for reason in {row["error"][:40] for row in failures}
         },
     }, ensure_ascii=False, indent=1))
-    return 0
+    return 3 if failures else 0
 
 
 if __name__ == "__main__":

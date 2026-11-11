@@ -42,6 +42,10 @@ SNAPSHOT = ROOT / "data" / "listing_snapshot_latest.json"
 LOG = ROOT / "data" / "corpus_refresh.log"
 REPORT = ROOT / "data" / "corpus_refresh_report.json"
 CANDIDATE = CORPUS.with_suffix(".json.candidate")      # 승인 대기 중인 새 코퍼스
+FAILURES = ROOT / "data" / "failures_full.jsonl"
+KNOWN_FAILURES = ROOT / "ops" / "collect_known_failures.json"
+HEADS = ROOT / "data" / "regulation_heads.json"
+
 PENDING = ROOT / "data" / "pending_change_report.json"  # 승인 대기 change-set 보고서
 
 
@@ -105,8 +109,44 @@ def corpus_summary() -> dict:
 
     dates = sorted((str(r.get("record_id")), str(r.get("규정_최근개정일")), str(r.get("규정_개정구분")),
                     str(r.get("규정_개정일_근거"))) for r in rows if r.get("규정_최근개정일"))
-    return {"조문": len(rows), "규정": len({r["규정명"] for r in rows}),
+    # 본문을 포함한 전체 레코드를 정렬해 직렬화한다. 행·키 순서만 바뀌면 같은 지문이다.
+    serialized = [json.dumps(r, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                  for r in rows]
+    ordered = sorted(zip(rows, serialized), key=lambda pair: (str(pair[0].get("record_id", "")), pair[1]))
+    digest = hashlib.sha256(("[" + ",".join(value for _, value in ordered) + "]").encode()).hexdigest()
+    return {"본문_지문": digest, "조문": len(rows), "규정": len({r["규정명"] for r in rows}),
             "개정일_지문": hashlib.sha256(json.dumps(dates, ensure_ascii=False).encode()).hexdigest()[:16]}
+
+
+def collection_failures() -> dict:
+    """실패 목록을 즉시 복사하고, 근거가 등록된 예외만 보류 대상에서 뺀다."""
+    known = json.loads(KNOWN_FAILURES.read_text(encoding="utf-8"))
+    for key, entry in known.items():
+        if not entry.get("사유", "").strip():
+            raise ValueError(f"수집 허용 목록의 사유 누락: {key}")
+        datetime.date.fromisoformat(entry["등록일"])
+    failures = [json.loads(line) for line in FAILURES.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not failures:
+        raise ValueError("부분 수집 종료 코드에 실패 목록이 없음")
+    allowed, blocked = [], []
+    for failure in failures:
+        reason = known.get(str(failure["source_key"]))
+        (allowed if reason else blocked).append({**failure, **({"허용_근거": reason} if reason else {})})
+    return {"실패_건수": len(failures), "실패_목록": failures,
+            "허용된 실패": allowed, "허용된 실패_건수": len(allowed),
+            "보류_실패": blocked, "보류_실패_건수": len(blocked)}
+
+
+def stale_regulations() -> list[dict]:
+    """개정일 부착과 같은 현행 판정으로 구판 의심 규정을 찾는다."""
+    from scripts.annotate_revision_dates import current_rules
+
+    if not HEADS.exists():
+        return []  # 머리글 누락 여부는 뒤의 개정일 게이트가 검사한다.
+    heads = json.loads(HEADS.read_text(encoding="utf-8"))["heads"]
+    return [{**heads[key], "규정명": name, "source_key": key}
+            for name, key in sorted(current_rules(CORPUS))
+            if heads.get(key, {}).get("stale") is True]
 
 
 def build_current_map(path, raw: list[dict]) -> dict:
@@ -202,6 +242,12 @@ def _adopt_candidate(fingerprint: str) -> int:
     before = corpus_summary()
     report: dict = {"시작": started, "이전": before, "모드": "candidate_adopt",
                     "대사": {"개명": 0, "목록_소실": 0}}
+    # change-set 승인은 수집 누락·구판 보류까지 해제하는 승인이 아니다.
+    if REPORT.exists():
+        previous_report = json.loads(REPORT.read_text(encoding="utf-8"))
+        for field in ("수집", "구판 의심", "경고"):
+            if field in previous_report:
+                report[field] = previous_report[field]
     prev_rows = json.loads(CORPUS.read_text(encoding="utf-8"))
     new_rows = json.loads(CANDIDATE.read_text(encoding="utf-8"))
     ok, change = change_gate.guard(
@@ -270,11 +316,31 @@ def main() -> int:
             ("항목식", [PY, "scripts/collect_item_style.py"]),
             # 규정 단위 「최근 개정일」(W3 Phase A, 2026-11-10). 수집 뒤에 붙여야
             # 새로 들어온 판본까지 덮는다. 규정 머리글은 fetch_regulation_heads.py 결과를 쓴다.
+            ("연혁 머리글", [PY, "scripts/fetch_regulation_heads.py"]),
             ("개정일", [PY, "scripts/annotate_revision_dates.py"]),
             ("대조표", [PY, "scripts/coverage_report.py"]),
         ]
         for name, args in steps:
-            result = run(args)
+            try:
+                result = run(args)
+            except subprocess.TimeoutExpired as exc:
+                if name != "연혁 머리글":
+                    raise
+                report.setdefault("경고", []).append(f"연혁 머리글 시간 초과 ({exc.timeout}초)")
+                report["구판 의심"] = stale_regulations()
+                log("[경고] " + report["경고"][-1])
+                continue
+            if name == "수집" and result.returncode == 3:
+                report["수집"] = collection_failures()
+                log(f"[부분 수집] 실패 {report['수집']['실패_건수']}건")
+                continue
+            if name == "연혁 머리글":
+                report["구판 의심"] = stale_regulations()
+                if result.returncode != 0:
+                    report.setdefault("경고", []).append(
+                        f"연혁 머리글 실패 (exit {result.returncode}): {(result.stderr or result.stdout)[-400:]}")
+                    log("[경고] " + report["경고"][-1])
+                    continue
             if result.returncode != 0:
                 raise RuntimeError(f"{name} 실패 (exit {result.returncode}): {result.stderr[-400:]}")
             log(f"[완료] {name}")
@@ -362,7 +428,15 @@ def _finish(report: dict, before: dict, changed: bool | None = None) -> int:
         changed = after != before or report["대사"]["개명"] > 0
     report["이후"] = after
     report["변경"] = {"조문": after["조문"] - before["조문"], "규정": after["규정"] - before["규정"]}
-    if changed:
+    holds = []
+    if report.get("수집", {}).get("보류_실패_건수", 0):
+        holds.append("부분 수집")
+    if report.get("구판 의심"):
+        holds.append("구판 의심")
+    if holds:
+        report["결과"] = "·".join(holds) + "·배포 보류"
+        note = report["결과"] + " — 리포트 확인 후 재수집 필요"
+    elif changed:
         report["결과"] = "성공·배포 대기"
         # 빌드는 **Cloud Build**로 한다. 이전 안내는 `docker buildx`였는데, 이 맥에는
         # Docker Desktop이 없어(=/usr/local/bin/docker 심볼릭 링크만 남음) 그대로
