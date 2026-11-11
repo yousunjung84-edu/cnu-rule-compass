@@ -35,7 +35,12 @@ sys.path.insert(0, str(ROOT))
 # ★ 코어(wheel 설치본)는 코퍼스를 RULE_COMPASS_DATA_DIR 에서 찾는다 — 없으면
 # site-packages 옆을 보고 못 찾는다(2026-09-07 P04). 명시 지정이 있으면 존중한다.
 os.environ.setdefault("RULE_COMPASS_DATA_DIR", str(ROOT / "data"))
-from core.item_style import PAST_VERSION_RE, extract  # noqa: E402  # 진본 (P07 가′)
+from core.item_style import extract  # noqa: E402  # 진본 (P07 가′)
+# 구판 판정은 갱신 게이트와 같은 코어 함수를 쓴다(refresh_corpus.past_names). 0.7.0 코어 식
+# (…|\(\s*\d{4})은 판이 하나뿐인 「…운용 지침(2013. 9. 1. 제정)」(4167)도 구판으로 보아
+# 항목 6개를 뽑고도 코퍼스에서 빠져 있었다 — 예외는 코어 프로필 명단으로 준다(2026-11-11).
+sys.path.insert(1, str(Path(__file__).resolve().parent))
+from refresh_corpus import listed_editions, past_names  # noqa: E402
 from core.search import prepare_article  # noqa: E402
 
 CORPUS = ROOT / "data" / "rules_corpus.json"
@@ -64,12 +69,20 @@ def main() -> int:
     done: list[str] = []
     skipped: list[str] = []
     now = datetime.now().astimezone().isoformat(timespec="seconds")
+    editions = listed_editions()
+    for failure in failures:
+        editions.setdefault(failure["규정명"], set()).add(str(failure["source_key"]))
+    past = past_names(editions)
     for failure in failures:
         name = failure["규정명"]
         key = str(failure["source_key"])
         if key in have_keys:
             continue  # 이미 다른 경로로 들어온 규정은 건드리지 않는다
-        if not include_past and PAST_VERSION_RE.search(name):
+        if not include_past and name in past:
+            continue
+        if failure.get("stage") != "parse" or failure.get("error") != "제N조 패턴을 찾지 못함":
+            # 다운로드·변환 실패면 남은 마크다운이 옛 판일 수 있다 — 항목식으로 메우지 않는다.
+            skipped.append(f"{name} (수집 실패 단계 {failure.get('stage')} — 항목식 대상 아님)")
             continue
         path = MARKDOWN / f"key_{key}.md"
         if not path.exists():

@@ -309,15 +309,20 @@ class ChangeGateCurrentTest(unittest.TestCase):
         corpus = Path(__file__).resolve().parents[1] / "data" / "rules_corpus.json"
         if not corpus.exists():
             self.skipTest("코퍼스 미수집 환경")
-        from core.search import _SUPERSEDED_NAME_RE, _YEAR_PREFIX_RE
-        names = {str(r.get("규정명", "")) for r in json.loads(corpus.read_text(encoding="utf-8"))}
-        stuck = []
-        for name in names:
-            m = _YEAR_PREFIX_RE.match(name)
-            year_prefixed = bool(m and name[m.end():].strip())
-            if (_SUPERSEDED_NAME_RE.match(name) or year_prefixed) \
-                    and change_gate.lineage_of(name) == name:
-                stuck.append(name)
+        # 코어가 실제로 내리는 이름을 코어 공개 함수로 받는다(0.7.1에서 내부 정규식 제거).
+        from collections import defaultdict
+
+        from core.search import _YEAR_PREFIX_RE, tail_superseded_names, year_prefix_demoted
+        keys = defaultdict(set)
+        for r in json.loads(corpus.read_text(encoding="utf-8")):
+            keys[str(r.get("규정명", ""))].add(str(r.get("source_key", "")))
+        demoted = tail_superseded_names(dict(keys)) | set(year_prefix_demoted(set(keys)))
+        self.assertTrue(demoted, "코어가 내리는 이름이 0건 — 검사가 비었다")
+        # 연도 접두는 최신판까지 전부 본다 — 최신판만 계열이 갈라져도 구판과 끊긴다(Codex 5차).
+        year_prefixed = {name for name in keys
+                         if (m := _YEAR_PREFIX_RE.match(name)) and name[m.end():].strip()}
+        self.assertTrue(year_prefixed - demoted, "최신 연도판이 검사 대상에 없다")
+        stuck = [name for name in demoted | year_prefixed if change_gate.lineage_of(name) == name]
         self.assertEqual([], sorted(stuck)[:10], f"{len(stuck)}건이 단독 계열로 남는다")
 
     def test_형제_key의_상쇄로_한_key의_현행_전멸이_가려지지_않는다(self):

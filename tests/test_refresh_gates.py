@@ -23,11 +23,12 @@ class RefreshGatesTest(unittest.TestCase):
         self.stack = contextlib.ExitStack()
         self.addCleanup(self.stack.close)
         self.tmp = Path(self.stack.enter_context(tempfile.TemporaryDirectory(dir=Path(__file__).parent)))
-        for name in ("CORPUS", "REPORT", "CANDIDATE", "PENDING", "FAILURES", "KNOWN_FAILURES", "HEADS"):
+        for name in ("CORPUS", "REPORT", "CANDIDATE", "PENDING", "FAILURES", "KNOWN_FAILURES", "HEADS", "SNAPSHOT"):
             self.stack.enter_context(patch.object(rc, name, self.tmp / name))
         self.stack.enter_context(patch.object(rc, "log"))
         self.stack.enter_context(patch.object(rc.subprocess, "run"))
         self.stack.enter_context(patch.object(rc, "reconcile_names", return_value={"개명": 0}))
+        self.stack.enter_context(patch.object(rc, "check_core_version", return_value="0.7.1"))
         self.stack.enter_context(patch.object(rc, "build_current_map", side_effect=lambda p, rows: {r["record_id"]: True for r in rows}))
         self.stack.enter_context(patch.object(dates, "current_rules", return_value={("규정", "1")}))
         self.stack.enter_context(patch.object(sys, "argv", ["refresh"]))
@@ -35,12 +36,13 @@ class RefreshGatesTest(unittest.TestCase):
         self.write(rc.CORPUS, self.rows)
         self.write(rc.HEADS, {"heads": {}})
         self.write(rc.KNOWN_FAILURES, {})
+        self.write(rc.SNAPSHOT, [])
         self.calls = []
 
     def write(self, path, value):
         path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
 
-    def execute(self, collect_code=0, head_code=0, other=None):
+    def execute(self, collect_code=0, head_code=0, other=None, item_keys=()):
         def fake(args, timeout=0):
             self.calls.append(args)
             code = 0
@@ -50,6 +52,11 @@ class RefreshGatesTest(unittest.TestCase):
                 code = collect_code
             if "scripts/fetch_regulation_heads.py" in args:
                 code = head_code
+            if "scripts/collect_item_style.py" in args and item_keys:
+                names = {str(f["source_key"]): f.get("규정명") for f in map(json.loads, rc.FAILURES.read_text().splitlines())}
+                self.rows += [{"record_id": f"항목{k}", "규정명": names.get(k, "다른 이름"), "source_key": k, "본문": "가",
+                               "조문번호": "1.", "record_type": "항목"} for k in item_keys]
+                self.write(rc.CORPUS, self.rows)
             if other and other in args:
                 code = 3
             return subprocess.CompletedProcess(args, code, "완료", "실패" if code else "")
@@ -153,6 +160,175 @@ class RefreshGatesTest(unittest.TestCase):
         _, report = self.execute()
         self.assertEqual(report["구판 의심"], [])
         self.assertIn("배포_명령", report)
+
+
+    # 박사 결정 (가), 2026-11-11 — 현행 실패만 배포를 막고 구판 실패는 경고.
+    def test_구판_실패만_있으면_배포_대기_경고는_남긴다(self):
+        rc.FAILURES.write_text("\n".join(json.dumps({"source_key": k, "규정명": n}) for k, n in (
+            ("1797", "교과과정 편성 및 운영지침(2008. 6. 25 개정전)"),
+            ("1795", "교육공무원 국외여행 업무처리지침(2006. 9. 26. 개정전)"))), encoding="utf-8")
+        _, report = self.execute(collect_code=3)
+        self.assertEqual(report["결과"], "성공·배포 대기")
+        self.assertEqual(report["수집"]["구판 실패_건수"], 2)
+        self.assertEqual(report["수집"]["보류_실패_건수"], 0)
+        self.assertIn("배포_명령", report)
+
+    def test_현행_실패가_섞이면_보류(self):
+        rc.FAILURES.write_text("\n".join(json.dumps({"source_key": k, "규정명": n}) for k, n in (
+            ("1797", "교과과정 편성 및 운영지침(2008. 6. 25 개정전)"),
+            ("9001", "학사 운영 지침"))), encoding="utf-8")
+        _, report = self.execute(collect_code=3)
+        self.assertEqual(report["결과"], "부분 수집·배포 보류")
+        self.assertEqual([f["source_key"] for f in report["수집"]["보류_실패"]], ["9001"])
+        self.assertNotIn("배포_명령", report)
+
+    def _no_article(self, *keys, stage="parse", error=rc.NO_ARTICLE_ERROR):
+        rc.FAILURES.write_text("\n".join(json.dumps({"source_key": k, "규정명": f"{k} 지침", "stage": stage, "error": error},
+                                                    ensure_ascii=False) for k in keys))
+
+    def test_다운로드_실패는_옛_마크다운으로_편입돼도_보류(self):
+        self._no_article("편입", stage="download", error="HTTP 503")
+        _, report = self.execute(collect_code=3, item_keys=("편입",))
+        self.assertEqual(report["수집"]["항목식 편입_건수"], 0)
+        self.assertEqual(report["수집"]["보류_실패_건수"], 1)
+
+    def test_이번_항목식이_넣지_않은_판본은_복구가_아니다(self):
+        self._no_article("편입")
+        self.rows.append({"record_id": "옛", "규정명": "편입 지침", "source_key": "편입", "본문": "가",
+                          "조문번호": "1.", "record_type": "항목"})
+        self.write(rc.CORPUS, self.rows)
+        _, report = self.execute(collect_code=3)
+        self.assertEqual(report["수집"]["보류_실패_건수"], 1)
+        rc.FAILURES.write_text(json.dumps({"source_key": "편입", "규정명": "편입 지침", "stage": "parse",
+                                           "error": rc.NO_ARTICLE_ERROR}, ensure_ascii=False))
+        self.rows = [r for r in self.rows if r["record_id"] != "옛"]
+        self.rows.append({"record_id": "별표", "규정명": "편입 지침", "source_key": "편입", "본문": "가",
+                          "조문번호": "별표 1", "record_type": "별표"})
+        _, report = self.execute(collect_code=3)  # 같은 키라도 항목식 판본이 아니면 복구가 아니다
+        self.assertEqual(report["수집"]["보류_실패_건수"], 1)
+
+    def test_항목식으로_편입된_현행_실패는_보류하지_않는다(self):
+        self._no_article("편입", "누락")
+        _, report = self.execute(collect_code=3, item_keys=("편입",))
+        self.assertEqual(report["수집"]["항목식 편입_건수"], 1)
+        self.assertEqual([f["source_key"] for f in report["수집"]["보류_실패"]], ["누락"])
+        self.assertNotIn("배포_명령", report)
+        self.rows = self.rows[:1]  # 앞 실행이 넣은 항목 판본을 걷어 낸다
+        self.write(rc.CORPUS, self.rows)
+        _, report = self.execute(collect_code=3, item_keys=("편입", "누락"))
+        self.assertEqual(report["수집"]["보류_실패_건수"], 0)
+        self.assertIn("배포_명령", report)
+
+    def test_구판_판정은_코어_전남대_기준을_따른다(self):
+        """코어 tail_superseded_names + year_prefix_demoted — 판이 하나뿐인 예외는 프로필 명단만."""
+        editions = {n: {k} for n, k in {
+            "수업관리 지침": "1", "수업관리 지침(2012. 12. 26. 제정)": "2",
+            "전남대학교 대학원생 권리장전 (현행, 2016. 8. 26.(제정))": "3",
+            "융합인재교육원 취업전담조교 운용 지침(2013. 9. 1. 제정)": "4167",       # 명단
+            "전남대학교 대학원 학과간 이동(전과) 지침 (2013. 7. 17.)": "3862",      # 명단
+            "다른 유일판 지침(2013. 9. 1. 제정)": "8",                               # 명단 밖
+            "전남대학교 교육 및 연구 조교 선발과 운영에 관한 지침(2012)": "9",
+            "2007학년도 강사료 지급지침": "10", "2025학년도 강사료 지급지침": "11",
+            "옛 규정(2010. 1. 1. 폐지(고시))": "12", "옛 지침(2024. 1. 10. 개전전)": "13",
+            "전남대학교 일반대학원 학과 신설·폐지 및 학사구조 개편 지침": "14"}.items()}
+        past = rc.past_names(editions)
+        self.assertEqual({"수업관리 지침(2012. 12. 26. 제정)", "다른 유일판 지침(2013. 9. 1. 제정)",
+                          "전남대학교 교육 및 연구 조교 선발과 운영에 관한 지침(2012)", "2007학년도 강사료 지급지침",
+                          "옛 규정(2010. 1. 1. 폐지(고시))", "옛 지침(2024. 1. 10. 개전전)"}, past)
+
+    def test_명단의_유일판_실패는_보류_명단_밖은_경고(self):
+        single = "융합인재교육원 취업전담조교 운용 지침(2013. 9. 1. 제정)"
+        self.write(rc.SNAPSHOT, [{"name": single, "key": "4167"}, {"name": "다른 지침(2012. 1. 1. 제정)", "key": "2"}])
+        rc.FAILURES.write_text("\n".join(json.dumps({"source_key": k, "규정명": n}, ensure_ascii=False) for k, n in (
+            ("4167", single), ("2", "다른 지침(2012. 1. 1. 제정)"))), encoding="utf-8")
+        _, report = self.execute(collect_code=3)
+        self.assertEqual([f["source_key"] for f in report["수집"]["보류_실패"]], ["4167"])
+        self.assertEqual([f["source_key"] for f in report["수집"]["구판 실패(경고)"]], ["2"])
+
+
+class CoreVersionGateTest(unittest.TestCase):
+    """수집 환경 코어 == 배포 고정 코어 >= 0.7.1 (2026-11-11)."""
+
+    def check(self, pinned, installed, code=0, line=None, child_file=None):
+        import core
+        child_file = child_file or core.__file__  # 기본: 부모와 같은 코어 파일
+        with tempfile.TemporaryDirectory() as d:
+            req = Path(d) / "requirements-core.txt"
+            line = line or f"rule-compass-core=={pinned} \\"
+            req.write_text(f"# 주석\n{line}\n    --hash=sha256:00\n", encoding="utf-8")
+            done = subprocess.CompletedProcess([], code, f"{installed}\n{child_file}\n", "")
+            with patch.object(rc, "REQUIREMENTS_CORE", req), patch.object(rc.subprocess, "run", return_value=done):
+                return rc.check_core_version()
+
+    def test_같은_0_7_1이면_통과(self):
+        self.assertEqual("0.7.1", self.check("0.7.1", "0.7.1"))
+
+    def test_수집_환경과_배포_고정이_다르면_중단(self):
+        with self.assertRaises(RuntimeError):
+            self.check("0.7.1", "0.6.2")
+
+    def test_0_7_1보다_낮으면_중단(self):
+        with self.assertRaises(RuntimeError):
+            self.check("0.7.0", "0.7.0")
+
+    def test_코어를_못_읽으면_중단(self):
+        with self.assertRaises(RuntimeError):
+            self.check("0.7.1", "", code=1)
+
+    def test_시험판은_정식판으로_보지_않는다(self):
+        for version in ("0.7.1rc1", "0.7.1.dev1", "0.7.1a1", "0.7.1.post1"):
+            with self.subTest(version), self.assertRaises(RuntimeError):
+                self.check(version, version)
+
+    def test_버전_고정_줄의_다른_표기도_읽는다(self):
+        for line in ("  rule-compass-core==0.7.1 \\", "rule-compass-core == 0.7.1 \\", "rule-compass-core==0.7.1\\",
+                     "rule-compass-core==0.7.1  # 주석"):
+            with self.subTest(line):
+                self.assertEqual("0.7.1", self.check("0.7.1", "0.7.1", line=line))
+
+    def test_부모와_수집_환경의_코어_파일이_다르면_중단(self):
+        with self.assertRaises(RuntimeError):
+            self.check("0.7.1", "0.7.1", child_file="/elsewhere/site-packages/core/__init__.py")
+
+    def test_승인_경로도_버전이_틀리면_멈춘다(self):
+        with tempfile.TemporaryDirectory() as d:
+            candidate, report = Path(d) / "c.candidate", Path(d) / "r.json"
+            candidate.write_text("[]", encoding="utf-8")
+            with patch.object(rc, "CANDIDATE", candidate), patch.object(rc, "REPORT", report), patch.object(rc, "log"), \
+                    patch.object(rc, "check_core_version", side_effect=RuntimeError("불일치")), \
+                    patch.object(rc, "_adopt_candidate") as adopt, patch.object(sys, "argv", ["refresh", "--approve", "ab"]):
+                self.assertEqual(1, rc.main())
+            adopt.assert_not_called()
+
+    def test_중단되면_코퍼스를_건드리지_않는다(self):
+        with tempfile.TemporaryDirectory() as d:
+            corpus, report = Path(d) / "c.json", Path(d) / "r.json"
+            corpus.write_text("[]", encoding="utf-8")
+            with patch.object(rc, "CORPUS", corpus), patch.object(rc, "REPORT", report), patch.object(rc, "log"), \
+                    patch.object(rc, "check_core_version", side_effect=RuntimeError("불일치")), \
+                    patch.object(rc, "reconcile_names") as reconcile, patch.object(sys, "argv", ["refresh"]):
+                self.assertEqual(1, rc.main())
+            reconcile.assert_not_called()
+            self.assertFalse(corpus.with_suffix(".json.refresh-backup").exists())
+            self.assertIn("코어 버전", json.loads(report.read_text(encoding="utf-8"))["결과"])
+
+
+class StaleImportPathTest(unittest.TestCase):
+    def test_스크립트_실행_경로에서도_구판_점검을_불러온다(self):
+        root = Path(__file__).resolve().parents[1]
+        code = ("import sys, json, tempfile, pathlib;"
+                f"sys.path[:] = [{str(root / 'scripts')!r}] + [p for p in sys.path[1:] if p not in ('', {str(root)!r})];"
+                "import refresh_corpus as rc;"
+                "d = pathlib.Path(tempfile.mkdtemp());"
+                "(d/'h.json').write_text(json.dumps({'heads': {}}));"
+                "(d/'c.json').write_text('[]');"
+                "rc.HEADS = d/'h.json'; rc.CORPUS = d/'c.json';"
+                "\ntry:\n    rc.stale_regulations()\nexcept ValueError:\n    pass\nprint('불러옴')")
+        # 빈 코퍼스라 현행 판정에서 ValueError가 나는 것까지는 괜찮다 — 확인할 것은
+        # scripts. 패키지 import가 ModuleNotFoundError 없이 되는가다.
+        done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=root / "scripts")
+        self.assertEqual(done.returncode, 0, done.stderr[-500:])
+        self.assertEqual(done.stdout.strip(), "불러옴")
 
 
 class CollectorTest(unittest.TestCase):
