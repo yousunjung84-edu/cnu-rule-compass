@@ -54,3 +54,6 @@ data/reparse_evidence_*.json
 data/reparse_removed.json
 data/rules_corpus.json.pre_*
 data/regulation_heads.json
+
+# 사용 기록 보존본(운영 로그 사본) — 로컬 전용
+data/usage

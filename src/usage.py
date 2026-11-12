@@ -66,6 +66,40 @@ def _usage_stream():
     return sys.stdout if _USAGE_CHANNEL == "stdout" else sys.stderr
 
 
+# 사용 집계에 이름 그대로 남기는 접속 프로그램 (User-Agent 첫 낱말).
+# 여기 없는 이름은 "기타"로 적는다 — 머리글에 실린 IP·이메일이 로그로 새지 않게.
+KNOWN_CLIENTS = frozenset({
+    "undici", "Claude-User", "claude-code", "python-httpx", "Python-urllib", "curl",
+})
+
+
+def _request_client() -> str | None:
+    """이 호출을 보낸 접속 프로그램의 이름(User-Agent 첫 낱말)을 돌려준다.
+
+    HTTP 전송에서만 값이 있다. MCP SDK가 도구 실행 중 `request_ctx`에 요청을
+    실어 두므로 도구 시그니처를 건드리지 않고 읽는다. stdio·테스트처럼 HTTP
+    요청이 없으면 None — 그때는 필드 자체를 싣지 않아 이전 줄과 모양이 같다.
+
+    머리글은 요청하는 쪽이 마음대로 적는 글자라 IP·이메일·장치명이 들어올 수
+    있다. 그래서 알려진 프로그램 이름(KNOWN_CLIENTS)만 그대로 남기고 나머지는
+    전부 "기타"로 적는다. 프로그램을 구별하려는 것이지 사람을 구별하려는 것이
+    아니다.
+    """
+    try:
+        from mcp.server.lowlevel.server import request_ctx
+
+        request = request_ctx.get().request
+        agent = request.headers.get("user-agent", "") if request is not None else None
+    except Exception:
+        return None
+    if agent is None:
+        return None
+    token = agent.split("/", 1)[0].split(" ", 1)[0]
+    if not token:
+        return "(없음)"
+    return token if token in KNOWN_CLIENTS else "기타"
+
+
 def log_usage(tool: str, **fields) -> None:
     """익명 사용 집계를 구조화 JSON 한 줄로 남긴다 (2026-08-28, 박사 확정 (나)안).
 
@@ -80,6 +114,9 @@ def log_usage(tool: str, **fields) -> None:
     """
     if os.environ.get("RULECOMPASS_USAGE_LOG", "1").strip() == "0":
         return
+    client = _request_client()
+    if client is not None:
+        fields = {**fields, "client": client}
     try:
         print(json.dumps({"usage": tool, **fields}, ensure_ascii=False),
               file=_usage_stream(), flush=True)

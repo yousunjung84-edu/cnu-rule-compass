@@ -266,5 +266,54 @@ class SignatureTest(unittest.TestCase):
         self.assertIn("query", inspect.signature(wrapped).parameters)
 
 
+class ClientFieldTest(unittest.TestCase):
+    """접속 프로그램 필드 (2026-11-12) — HTTP 요청이 있을 때만 붙는다."""
+
+    def setUp(self) -> None:
+        usage.use_stderr_for_usage()
+        fake_search.response = {"status": "ok", "results": [{"규정명": "전남대학교 학칙"}]}
+
+    def _with_request(self, headers: dict | None):
+        from types import SimpleNamespace
+        from mcp.server.lowlevel.server import request_ctx
+
+        request = None if headers is None else SimpleNamespace(headers=headers)
+        token = request_ctx.set(SimpleNamespace(request=request))
+        try:
+            return _capture(usage.wrap("search_rule", fake_search), "학칙")[0]
+        finally:
+            request_ctx.reset(token)
+
+    def test_요청이_없으면_필드를_싣지_않는다(self) -> None:
+        lines, _ = _capture(usage.wrap("search_rule", fake_search), "학칙")
+        self.assertNotIn("client", lines[0])
+
+    def test_HTTP가_아닌_요청_문맥도_필드가_없다(self) -> None:
+        self.assertNotIn("client", self._with_request(None)[0])
+
+    def test_제품명만_남기고_버전은_버린다(self) -> None:
+        cases = {"undici": "undici", "Claude-User": "Claude-User",
+                 "claude-code/2.1.296 (sdk-cli)": "claude-code",
+                 "python-httpx/0.28.1": "python-httpx", "": "(없음)"}
+        for agent, expected in cases.items():
+            with self.subTest(agent=agent):
+                self.assertEqual(expected, self._with_request({"user-agent": agent})[0]["client"])
+
+    def test_머리글이_없으면_없음으로_적는다(self) -> None:
+        self.assertEqual("(없음)", self._with_request({})[0]["client"])
+
+    def test_모르는_이름은_기타로_적는다(self) -> None:
+        # 머리글은 요청자가 정한다 — IP·이메일·장치명이 그대로 남으면 안 된다.
+        for agent in ("192.0.2.1", "person@example.test/1.0", "Mozilla/5.0 (Macintosh)",
+                      "x" * 80, "Undici/6.0"):
+            with self.subTest(agent=agent):
+                self.assertEqual("기타", self._with_request({"user-agent": agent})[0]["client"])
+
+    def test_기존_필드는_그대로다(self) -> None:
+        line = self._with_request({"user-agent": "undici"})[0]
+        self.assertEqual({"usage", "status", "count", "rules", "advisories",
+                          "attachments_omitted", "unmatched_terms", "client"}, set(line))
+
+
 if __name__ == "__main__":
     unittest.main()

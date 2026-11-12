@@ -27,3 +27,5 @@ data/*.log
 *.pdf
 deck_*.html
 *.md
+# 사용 기록 보존본(운영 로그 사본) — 빌드 업로드에도 싣지 않는다
+data/usage
