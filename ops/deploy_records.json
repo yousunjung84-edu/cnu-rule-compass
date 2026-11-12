@@ -211,6 +211,31 @@
    "verified_by": "학사24 22/24(#5 개정안·#20 원문 날짜 없음), Codex 봉인 교차검증 task-mwa922ux(44)·task-mwa97qzj(34) 날짜 일치(원문 내 충돌 4610·5055 병기), unittest 112 OK, 운영 URL health 1.10.10 articles 17738·rules 838, get_article·search_rule 필드 노출·구판 미부착 확인, 태그 제거·drift 0·누수 0",
    "known_gaps": "list_rules·list_articles 미노출(코어 Phase B) · AIONI 지침 v3.7 미적용 · 원문 내 날짜 충돌 9건 원문 확인 필요",
    "followups": "2026-11-10 배포 뒤 AIONI 에이전트 AI 지침 v3.7 적용 — Terra 학사 24문항 재시험 날짜 제시 23·목록 일치 22·틀린 날짜 0(볼트 2026-11-10 노트 §5). known_gaps의 「v3.7 미적용」은 배포 시점 기준이다(2026-11-11 Codex 계획 검토 #16)."
+  },
+  {
+   "date": "2026-11-12",
+   "service_version": "1.10.11",
+   "change": "코어 0.7.1(유일 판 현행 편입: jnu single_edition_current 4167·3862, 굵은 글씨 항목 머리 인식) 해시 고정 + 코퍼스 16항목 추가(3862 항목 1.~10., 4167 항목 1.~6.). 기존 행 변경 0. 새 두 지침은 최근 개정일 근거 없어 미부착.",
+   "inputs_sha256": {
+    "data/rules_corpus.json": "963ec1c77d78de340670362bf9f7a125ecca52558f3c7995a25b6f562996de5f",
+    "data/lineage_corpus.json": "5c8034051143806a400a728b94cdc3d7df75450ed23b8dd92a5832f67827baa2",
+    "data/integrity_selfcheck_samples.json": "88eb2155b4da7fff6ed071260549be25e4a3b050fa6888056775299d34a70766",
+    "data/coverage_report.json": "2401a2df37634da6051537b8de398337c0bcdabb91b59e2f86a9500279b08506",
+    "data/regulation_heads.json": "f9f22391c0c66a766bdd619ac9959bb2ce995830568b5024a119400ad90f9ddf"
+   },
+   "change_gate": {
+    "fingerprint": null,
+    "risks": "0",
+    "현행_계열": "413→415",
+    "approved_by": "박사 2026-11-12 「전환하고 커밋까지 진행해줘」"
+   },
+   "rollback": "cnu-rule-compass-00069-wos (1.10.10)",
+   "revision": "cnu-rule-compass-00072-niv",
+   "image": "cnu-rule-compass:v1.10.11",
+   "digest": "sha256:db3ac10dd6e18298d1dfbbe48e02016f0aae7dbb4ec404221f0e55ab75bd8c9a",
+   "verified_by": "태그 리비전에서 새 지침 4질의 현행 검색·기존 15질의 상위5 운영 동일 15/15, 전환 뒤 운영 URL health 1.10.11 articles 17754·rules 840, 운영 MCP 새 지침 4질의 현행 확인, unittest 150 OK, 태그 v1101 제거·누수 0",
+   "known_gaps": "새 두 지침 최근 개정일 미부착(원문 근거 없음) · 코어 수정분 feat/index-db 미반영(cherry-pick 대기) · change_gate lineage_of 「현행」 꼬리 미제거(기존)",
+   "followups": "코어 98df1d2·0387334 feat/index-db cherry-pick"
   }
  ]
 }
