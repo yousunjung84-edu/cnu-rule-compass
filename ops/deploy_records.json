@@ -236,6 +236,31 @@
    "verified_by": "태그 리비전에서 새 지침 4질의 현행 검색·기존 15질의 상위5 운영 동일 15/15, 전환 뒤 운영 URL health 1.10.11 articles 17754·rules 840, 운영 MCP 새 지침 4질의 현행 확인, unittest 150 OK, 태그 v1101 제거·누수 0",
    "known_gaps": "새 두 지침 최근 개정일 미부착(원문 근거 없음) · 코어 수정분 feat/index-db 미반영(cherry-pick 대기) · change_gate lineage_of 「현행」 꼬리 미제거(기존)",
    "followups": "코어 98df1d2·0387334 feat/index-db cherry-pick"
+  },
+  {
+   "date": "2026-11-12",
+   "service_version": "1.10.12",
+   "change": "사용 집계 줄에 client 칸(User-Agent 첫 낱말, 허용 목록 6종 외 '기타') 추가 — HTTP 요청이 있을 때만. 코퍼스·엔진 변경 없음.",
+   "inputs_sha256": {
+    "data/rules_corpus.json": "963ec1c77d78de340670362bf9f7a125ecca52558f3c7995a25b6f562996de5f",
+    "data/lineage_corpus.json": "5c8034051143806a400a728b94cdc3d7df75450ed23b8dd92a5832f67827baa2",
+    "data/integrity_selfcheck_samples.json": "88eb2155b4da7fff6ed071260549be25e4a3b050fa6888056775299d34a70766",
+    "data/coverage_report.json": "2401a2df37634da6051537b8de398337c0bcdabb91b59e2f86a9500279b08506",
+    "data/regulation_heads.json": "f9f22391c0c66a766bdd619ac9959bb2ce995830568b5024a119400ad90f9ddf"
+   },
+   "change_gate": {
+    "fingerprint": null,
+    "risks": "해당 없음(코퍼스 동일)",
+    "현행_계열": "415→415",
+    "approved_by": "박사 2026-11-12 「7건 다 고치고 배포까지 진행해줘」"
+   },
+   "rollback": "cnu-rule-compass-00072-niv (1.10.11)",
+   "revision": "cnu-rule-compass-00076-goj",
+   "image": "cnu-rule-compass:v1.10.12",
+   "digest": "sha256:4a073458bfd656771f4d3a54c67df5f29c56f546e144ec0cabab53c85324f53b",
+   "verified_by": "태그 리비전 health 1.10.12/17754/840, 상위5 운영 동일 10/10, 로그 client=undici·python-httpx·curl 그대로·IP형·임의 이름 12건 '기타'(원문 0), 전환 뒤 운영 health 1.10.12·search·get_article ok, 태그 v1101 제거·누수 0, unittest 162 중 실패 3(test_reparse_guard 환경 기준선)",
+   "known_gaps": "이전 줄(1.10.11까지)에는 client 칸 없음 — 출처 구분은 이 배포부터. usage_log.py pull 정기 실행 미설정.",
+   "followups": "usage_log.py pull 일일 실행(03:00 작업 뒤) — 박사 승인 대기"
   }
  ]
 }
