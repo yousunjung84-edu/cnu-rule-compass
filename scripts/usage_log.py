@@ -198,6 +198,11 @@ def cmd_report(args) -> int:
         print(f"제외한 날짜(시험 등): {', '.join(sorted(exclude))}")
 
     print("\n## 10개교 운영 서비스 POST /mcp 요청 수 — 접속 프로그램 묶음별")
+    # 2026-11-15 실측: claude.ai 커넥터 요청 834건(11/13~14)이 도구 호출 0건이었다.
+    # Claude Code 세션은 시작할 때마다 커넥터에 연결 절차(약 4건)를 보낸다.
+    print("※ 요청 수에는 연결 절차(시작·도구 목록)가 포함된다. 특히 claude.ai 커넥터는 "
+          "우리 Claude Code 세션이 시작할 때마다 접속해 대부분 우리 몫이다 — 사용 증거는 "
+          "아래 도구 호출 줄로 본다.")
     by_group: collections.Counter = collections.Counter()
     by_service_group: collections.Counter = collections.Counter()
     for day, counts in http.items():
