@@ -45,6 +45,39 @@
         "tags_allowed": false
       },
       "why_min_instances": "콜드스타트 p50 1.1초 실측(2026-09-02). 상시 가동 근거 없음."
+    },
+    "rule-compass-gateway": {
+      "tier": "demo",
+      "note": "2026-11-05 시연용 비교 게이트웨이(단일 커넥터). 데이터 없음, 대학별 서버 10개를 호출만 한다. 코드 rule-compass-core gateway/. 시연 외 용도로 확산하지 않는다(박사 결정 2026-11-05).",
+      "expect": {
+        "min_instances": "0",
+        "cpu": "1",
+        "memory": "512Mi",
+        "concurrency": "40",
+        "tags_allowed": false,
+        "env_required": [
+          "ALLOWED_HOSTS"
+        ]
+      }
+    },
+    "jnu-irb-compass": {
+      "tier": "pilot",
+      "note": "2026-11-18 박사 결정 — 전남대 IRB 사무국 시범(직접 써 보기). 코드 ~/projects/irb-compass (mcp_irb/http_server.py·Dockerfile). 일반 팩 irb-pack-jnu-0.5.12(295행, manifest 77e83cb1…, 11/18 출처 링크 공개 페이지로 교체)만 싣는다. staff 전문 팩은 무인증 원격 금지(서버가 기동 거부). 사무국 AIONI 커넥터 URL 이 이 주소에 묶이므로 서비스 이름을 바꾸지 않는다.",
+      "expect": {
+        "min_instances": "0",
+        "max_instances": "1",
+        "cpu": "1",
+        "memory": "512Mi",
+        "concurrency": "40",
+        "tags_allowed": false,
+        "env_required": [
+          "ALLOWED_HOSTS",
+          "IRB_PACK_SHA256",
+          "RULE_COMPASS_SERVER_VERSION"
+        ]
+      },
+      "why_min_instances": "박사 결정(2026-11-18) min 0 + max 1. 평소 대기 비용 0, 유휴 뒤 첫 요청 약 2.4초 지연(규정 나침반 0.7.0 DB 모드 실측을 참고값으로 씀 — 이 서비스 콜드스타트는 배포 뒤 실측).",
+      "why_max_instances": "무인증 주소가 퍼져도 비용 상한을 인스턴스 1개분으로 묶는다. 근거: 같은 코어·512Mi·동시성 40 부하 실측 14.4 req/s 오류 0(2026-09-23, 규정 나침반 임시 서비스) — 사무국 시범 규모의 한참 위. ⚠️ scripts/service_drift_check.py 는 아직 max_instances 를 대조하지 않는다(선언만)."
     }
   },
   "default_tier": "experimental",
