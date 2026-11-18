@@ -14,8 +14,8 @@
 이름을 만들어내는 것이 아니라 게시자의 지정을 복사하는 것이며, record_id는 저장값이
 우선하므로 불변이다. key가 목록에서 사라진 경우는 추정하지 않고 보고만 한다.
 
-순서: 대사 → 신규 수집 → 정규화 체인 → 대조표 → **테스트 게이트**(실패 시 코퍼스
-원복) → 리포트·알림. **배포는 자동으로 하지 않는다** — 무인 시점에 Docker 데몬이
+순서: 대사 → 같은 key 본문 변경 감지(보고만) → 신규 수집 → 정규화 체인 → 대조표 →
+**테스트 게이트**(실패 시 코퍼스 원복) → 리포트·알림. **배포는 자동으로 하지 않는다** — 무인 시점에 Docker 데몬이
 없을 수 있고, 운영 서비스 교체는 확인 후가 원칙이다. 성공 시 배포 명령을 리포트에 적는다.
 
 규정 계층(law.go.kr)은 v1 범위 밖 — 과거 부칙 중복 병합 사고 이력이 있어 자동
@@ -314,6 +314,23 @@ def reconcile_names() -> dict:
             "목록_소실_목록": missing_keys}
 
 
+def same_key_check() -> dict:
+    """같은 key 본문 변경 감지(2026-11-19). 감지만 한다 — 실패해도 갱신은 계속한다."""
+    try:
+        result = run([PY, "scripts/check_same_key_changes.py"], timeout=3600)
+    except subprocess.TimeoutExpired as exc:
+        return {"결과": f"시간 초과 ({exc.timeout}초)"}
+    except OSError as exc:
+        return {"결과": "실행 실패", "오류": str(exc)[:300]}
+    lines = (result.stdout or "").strip().splitlines()
+    try:
+        summary = json.loads(lines[-1])
+    except (IndexError, ValueError):
+        return {"결과": "실행 실패", "오류": (result.stderr or result.stdout or "")[-300:]}
+    log(f"[같은 키 본문] {summary.get('결과')} — {summary.get('집계')}")
+    return summary
+
+
 def _adopt_candidate(fingerprint: str) -> int:
     """--approve <fp>: 보존된 후보를 **재수집 없이** 채택한다 (2026-09-02 code-review #2).
 
@@ -402,6 +419,9 @@ def main() -> int:
     report: dict = {"시작": started, "이전": before}
     try:
         report["대사"] = reconcile_names()
+        # 대사가 방금 받은 게시 목록으로 현행 key를 다시 받아 바이트를 비교한다.
+        # 반영은 하지 않는다(record_id 재발급) — 검토 필요면 알림에만 싣는다.
+        report["같은 키 본문"] = same_key_check()
 
         steps = [
             ("수집", [PY, "scripts/collect_guidelines_full.py"]),
@@ -607,6 +627,8 @@ def _finish(report: dict, before: dict, changed: bool | None = None) -> int:
     else:
         report["결과"] = "변경 없음"
         note = "게시 변경 없음 — 배포 불필요"
+    if report.get("같은 키 본문", {}).get("검토_필요"):
+        note += f" · 같은 키 본문 변경 {report['같은 키 본문']['검토_필요']}건 검토"
     REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     log(f"[종료] {report['결과']} {report.get('변경','')}")
     subprocess.run(["osascript", "-e",
