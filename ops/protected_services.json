@@ -62,7 +62,7 @@
     },
     "jnu-irb-compass": {
       "tier": "pilot",
-      "note": "2026-11-18 박사 결정 — 전남대 IRB 사무국 시범(직접 써 보기). 코드 ~/projects/irb-compass (mcp_irb/http_server.py·Dockerfile). 일반 팩 irb-pack-jnu-0.5.12(295행, manifest 77e83cb1…, 11/18 출처 링크 공개 페이지로 교체)만 싣는다. staff 전문 팩은 무인증 원격 금지(서버가 기동 거부). 사무국 AIONI 커넥터 URL 이 이 주소에 묶이므로 서비스 이름을 바꾸지 않는다. 2026-11-19 박사 결정 — 읽기 전용 GET /q·/a 추가(mcp_irb/page_routes.py, 같은 팩, noindex): AIONI 「챗봇」엔 커넥터 칸이 없어 박사 「나만 보기」 시험 챗봇이 페이지 스크랩으로 읽는다. 결과 1~4건이면 낱말별 보충(A1)·낱말별 적중 수(A2), 0건 보충 금지(e1) 유지. MCP 도구 계약 불변. 같은 날 L1: AIONI 페이지 스크랩 답당 5회 한도 대응으로 /q 결과에 팩 최장 조문 길이(상한 3,000자)까지 본문을 싣고 「전문 전체」 표시.",
+      "note": "2026-11-18 박사 결정 — 전남대 IRB 사무국 시범(직접 써 보기). 코드 ~/projects/irb-compass (mcp_irb/http_server.py·Dockerfile). 일반 팩 irb-pack-jnu-0.5.12(295행, manifest 77e83cb1…, 11/18 출처 링크 공개 페이지로 교체)만 싣는다. staff 전문 팩은 무인증 원격 금지(서버가 기동 거부). 사무국 AIONI 커넥터 URL 이 이 주소에 묶이므로 서비스 이름을 바꾸지 않는다. 2026-11-19 박사 결정 — 읽기 전용 GET /q·/a 추가(mcp_irb/page_routes.py, 같은 팩, noindex): AIONI 「챗봇」엔 커넥터 칸이 없어 박사 「나만 보기」 시험 챗봇이 페이지 스크랩으로 읽는다. 결과 1~4건이면 낱말별 보충(A1)·낱말별 적중 수(A2), 0건 보충 금지(e1) 유지. 같은 날 L1: AIONI 페이지 스크랩 답당 5회 한도 대응으로 /q 결과에 팩 최장 조문 길이(상한 3,000자)까지 본문을 싣고 「전문 전체」 표시. 같은 날 C2(박사 결정): MCP 도구 search_irb 도 A1 보충·A2 낱말별 적중을 준다(adapter.search_irb_plus — 도구 이름·인자 불변, 출력에 supplement·term_hits 추가, 0건 보충 금지 유지). 근거: 평가셋 17문항에서 n2 정답 근거 0→2건·o1 법 제16조 추가, 0건 기권 문항 4개는 그대로 0건. A3(0건이면 낱말별 보충)는 i1(타 기관)·e1에 후보를 만들어 채택하지 않았다.",
       "expect": {
         "min_instances": "0",
         "max_instances": "1",
